@@ -1,4 +1,14 @@
 pluginManagement {
+    resolutionStrategy {
+        eachPlugin {
+            if (providers.gradleProperty("bitchord.modernBuild").orNull == "true") {
+                when {
+                    requested.id.id.startsWith("com.android.") -> useVersion("9.3.3")
+                    requested.id.id.startsWith("org.jetbrains.kotlin.") -> useVersion("2.4.21")
+                }
+            }
+        }
+    }
     repositories {
         google()
         mavenCentral()
@@ -16,6 +26,12 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "BitChord"
+if (providers.gradleProperty("bitchord.modernBuild").orNull == "true") {
+    require(org.gradle.util.GradleVersion.current() >= org.gradle.util.GradleVersion.version("9.5")) {
+        "The AGP 9.3 candidate requires Gradle 9.5 or newer; use gradlew-modern."
+    }
+    logger.lifecycle("Modern build candidate: AGP 9.3.3 / Kotlin 2.4.21; application JVM targets are unchanged.")
+}
 include(":shared")
 include(":sharedUi")
 include(":desktopApp")

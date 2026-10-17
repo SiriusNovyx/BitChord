@@ -2,14 +2,25 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("org.jetbrains.kotlin.multiplatform")
-    id("com.android.library")
+    id("com.android.library") apply false
+    id("com.android.kotlin.multiplatform.library") apply false
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val modernBuild = providers.gradleProperty("bitchord.modernBuild").orNull == "true"
+apply(plugin = if (modernBuild) "com.android.kotlin.multiplatform.library" else "com.android.library")
+if (modernBuild) {
+    apply(from = rootProject.file("gradle/android-kmp-modern.gradle"))
+    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinJvmCompile>().configureEach {
+        compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
 kotlin {
-    androidTarget {
-        compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_17)
+    if (modernBuild) jvmToolchain(21)
+    if (!modernBuild) {
+        androidTarget {
+            compilerOptions.jvmTarget.set(JvmTarget.JVM_17)
         }
     }
 
@@ -63,7 +74,9 @@ kotlin {
     }
 }
 
-android {
-    namespace = "com.music.bitchord.shared"
-    compileSdk = 36
+if (!modernBuild) {
+    extensions.configure<com.android.build.gradle.LibraryExtension> {
+        namespace = "com.music.bitchord.shared"
+        compileSdk = 36
+    }
 }

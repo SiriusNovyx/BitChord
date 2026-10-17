@@ -1,0 +1,12 @@
+kotlin {
+    android {
+        namespace = "com.music.bitchord.${project.name.toLowerCase(Locale.ROOT)}"
+        // InnerTubeX's Android AAR is transitive through shared and requires API 37.
+        compileSdk = 37
+        if (project.name == 'sharedUi') {
+            minSdk = 26
+            androidResources { enable = true }
+        }
+        withHostTestBuilder { sourceSetTreeName = 'test' }
+    }
+}
