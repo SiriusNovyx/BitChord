@@ -1,0 +1,87 @@
+[
+  {
+    "file": "governor-0.10.4/LICENSE",
+    "url": "https://raw.githubusercontent.com/boinkor-net/governor/9f3a79dd47dd32acd589c562b8d4fefe99b93372/LICENSE",
+    "sha256": "2248fdedb215c73b6431d4c0419c6476c0aa19621fa94041aa7c5a3ce952e5cc"
+  },
+  {
+    "file": "librespot-audio-0.8.0/LICENSE",
+    "url": "https://raw.githubusercontent.com/librespot-org/librespot/d36f9f1907e8cc9d68a93f8ebc6b627b1bf7267d/LICENSE",
+    "sha256": "b6e979ad38c429c5811e9eb6930040a984619786f55ebc60660db05df5325ed6"
+  },
+  {
+    "file": "librespot-core-0.8.0/LICENSE",
+    "url": "https://raw.githubusercontent.com/librespot-org/librespot/d36f9f1907e8cc9d68a93f8ebc6b627b1bf7267d/LICENSE",
+    "sha256": "b6e979ad38c429c5811e9eb6930040a984619786f55ebc60660db05df5325ed6"
+  },
+  {
+    "file": "librespot-metadata-0.8.0/LICENSE",
+    "url": "https://raw.githubusercontent.com/librespot-org/librespot/d36f9f1907e8cc9d68a93f8ebc6b627b1bf7267d/LICENSE",
+    "sha256": "b6e979ad38c429c5811e9eb6930040a984619786f55ebc60660db05df5325ed6"
+  },
+  {
+    "file": "librespot-oauth-0.8.0/LICENSE",
+    "url": "https://raw.githubusercontent.com/librespot-org/librespot/d36f9f1907e8cc9d68a93f8ebc6b627b1bf7267d/LICENSE",
+    "sha256": "b6e979ad38c429c5811e9eb6930040a984619786f55ebc60660db05df5325ed6"
+  },
+  {
+    "file": "librespot-playback-0.8.0/LICENSE",
+    "url": "https://raw.githubusercontent.com/librespot-org/librespot/d36f9f1907e8cc9d68a93f8ebc6b627b1bf7267d/LICENSE",
+    "sha256": "b6e979ad38c429c5811e9eb6930040a984619786f55ebc60660db05df5325ed6"
+  },
+  {
+    "file": "librespot-protocol-0.8.0/LICENSE",
+    "url": "https://raw.githubusercontent.com/librespot-org/librespot/d36f9f1907e8cc9d68a93f8ebc6b627b1bf7267d/LICENSE",
+    "sha256": "b6e979ad38c429c5811e9eb6930040a984619786f55ebc60660db05df5325ed6"
+  },
+  {
+    "file": "priority-queue-2.7.0/LGPL-3.0-or-later.txt",
+    "url": "https://raw.githubusercontent.com/garro95/priority-queue/0c76fb8fe75e4457f16f8e6c8e86508d1a89ba1d/LGPL-3.0-or-later.txt",
+    "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+  },
+  {
+    "file": "priority-queue-2.7.0/MPL-2.0.txt",
+    "url": "https://raw.githubusercontent.com/garro95/priority-queue/0c76fb8fe75e4457f16f8e6c8e86508d1a89ba1d/MPL-2.0.txt",
+    "sha256": "c73cc0c27b0f24d5612e76bf83b5845c4fbd0374a1a8483f3d16befe58a60c9a"
+  },
+  {
+    "file": "symphonia-0.5.5/LICENSE",
+    "url": "https://raw.githubusercontent.com/pdeljanov/Symphonia/6d533f26150953a882a6a111ebd13f0abf7129d5/LICENSE",
+    "sha256": "c76f740d1521b9bed9ca7a04ad526c310493c62621b1341d623b431736533b30"
+  },
+  {
+    "file": "symphonia-bundle-flac-0.5.5/LICENSE",
+    "url": "https://raw.githubusercontent.com/pdeljanov/Symphonia/6d533f26150953a882a6a111ebd13f0abf7129d5/LICENSE",
+    "sha256": "c76f740d1521b9bed9ca7a04ad526c310493c62621b1341d623b431736533b30"
+  },
+  {
+    "file": "symphonia-bundle-mp3-0.5.5/LICENSE",
+    "url": "https://raw.githubusercontent.com/pdeljanov/Symphonia/6d533f26150953a882a6a111ebd13f0abf7129d5/LICENSE",
+    "sha256": "c76f740d1521b9bed9ca7a04ad526c310493c62621b1341d623b431736533b30"
+  },
+  {
+    "file": "symphonia-codec-vorbis-0.5.5/LICENSE",
+    "url": "https://raw.githubusercontent.com/pdeljanov/Symphonia/6d533f26150953a882a6a111ebd13f0abf7129d5/LICENSE",
+    "sha256": "c76f740d1521b9bed9ca7a04ad526c310493c62621b1341d623b431736533b30"
+  },
+  {
+    "file": "symphonia-core-0.5.5/LICENSE",
+    "url": "https://raw.githubusercontent.com/pdeljanov/Symphonia/6d533f26150953a882a6a111ebd13f0abf7129d5/LICENSE",
+    "sha256": "c76f740d1521b9bed9ca7a04ad526c310493c62621b1341d623b431736533b30"
+  },
+  {
+    "file": "symphonia-format-ogg-0.5.5/LICENSE",
+    "url": "https://raw.githubusercontent.com/pdeljanov/Symphonia/6d533f26150953a882a6a111ebd13f0abf7129d5/LICENSE",
+    "sha256": "c76f740d1521b9bed9ca7a04ad526c310493c62621b1341d623b431736533b30"
+  },
+  {
+    "file": "symphonia-metadata-0.5.5/LICENSE",
+    "url": "https://raw.githubusercontent.com/pdeljanov/Symphonia/6d533f26150953a882a6a111ebd13f0abf7129d5/LICENSE",
+    "sha256": "c76f740d1521b9bed9ca7a04ad526c310493c62621b1341d623b431736533b30"
+  },
+  {
+    "file": "symphonia-utils-xiph-0.5.5/LICENSE",
+    "url": "https://raw.githubusercontent.com/pdeljanov/Symphonia/6d533f26150953a882a6a111ebd13f0abf7129d5/LICENSE",
+    "sha256": "c76f740d1521b9bed9ca7a04ad526c310493c62621b1341d623b431736533b30"
+  }
+]

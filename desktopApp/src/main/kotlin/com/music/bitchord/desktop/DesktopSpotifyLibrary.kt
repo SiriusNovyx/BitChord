@@ -51,15 +51,22 @@ internal suspend fun loadSpotifyPlaylist(
     playlistId: String,
     update: ((DesktopCollection) -> DesktopCollection) -> Unit,
 ) = coroutineScope {
+    val oauth = DesktopSpotifyAccount.session.profile.value != null
+    val native = oauth && DesktopSpotifyRuntime.available && DesktopSpotifyPlayback.session.profile.value != null
     launch {
         // The library card only had a thumbnail.
-        runCatching { SpotifyLibrary.cover(playlistId) }.getOrNull()
+        runCatching { if (oauth) null else SpotifyLibrary.cover(playlistId) }.getOrNull()
             ?.let { cover -> update { it.copy(thumbnailUrl = cover) } }
     }
-    val tracks = SpotifyLibrary.tracks(playlistId) { soFar ->
+    val tracks = if (oauth) {
+        DesktopSpotifyAccount.session.withToken { DesktopSpotifyAccount.api.tracks(playlistId, it) }.also { found ->
+            update { it.copy(songs = found.map { track -> if (native) track.asNativeSong() else track.asPendingSong() }, loading = false) }
+        }
+    } else SpotifyLibrary.tracks(playlistId) { soFar ->
         update { it.copy(songs = soFar.map(SpotifyTrack::asPendingSong), loading = false) }
     }
     check(tracks.isNotEmpty()) { "This Spotify playlist has no tracks." }
+    if (native) return@coroutineScope
     val gate = Semaphore(MATCH_PARALLELISM)
     tracks.forEachIndexed { index, track ->
         launch {
