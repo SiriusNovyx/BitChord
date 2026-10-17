@@ -2,6 +2,7 @@ package com.music.bitchord.desktop
 
 import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -251,9 +252,10 @@ fun DesktopCanvasView(
     fallbackUrl: String? = null,
 ) {
     var frame by remember(url) { mutableStateOf<ImageBitmap?>(null) }
+    val visualPolicy by DesktopPerformance.policy.collectAsState()
 
-    LaunchedEffect(url, fallbackUrl, isPlaying) {
-        if (!isPlaying) return@LaunchedEffect
+    LaunchedEffect(url, fallbackUrl, isPlaying, visualPolicy.animateArtwork) {
+        if (!isPlaying || !visualPolicy.animateArtwork) return@LaunchedEffect
         // Round and round until the track ends or the player is closed. A canvas is a few seconds
         // long, so one pass through it is not the feature — and the decoder cannot be relied on to
         // rewind itself: its own seek does not take on an HLS manifest, which is what Apple serves,

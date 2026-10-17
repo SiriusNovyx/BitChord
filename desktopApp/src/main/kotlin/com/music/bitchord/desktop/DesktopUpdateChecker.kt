@@ -33,7 +33,7 @@ internal object DesktopUpdateChecker {
     )
 
     private const val LATEST_RELEASE_URL =
-        "https://api.github.com/repos/kushagrasinghx/BitChord/releases/latest"
+        "https://api.github.com/repos/SiriusNovyx/BitChord/releases/latest"
 
     val currentVersion: String = System.getProperty("bitchord.version") ?: "1.8-beta1"
 
@@ -66,14 +66,26 @@ internal object DesktopUpdateChecker {
     }.getOrNull()
 
     /**
-     * The release names its files `BitChord-<version>-windows-x64-setup.exe` and
-     * `BitChord-<version>-linux-x86_64.AppImage` (see .github/workflows/release.yml); match on the
-     * platform part so a version change does not matter.
+     * Match the running JVM's architecture: an x64 release must never replace a native ARM64 build.
      */
-    private fun installerUrl(release: JsonObject): String? {
+    internal fun installerUrl(
+        release: JsonObject,
+        platform: String = when {
+            DesktopPlatform.isWindows -> "windows"
+            DesktopPlatform.isLinux -> "linux"
+            else -> "other"
+        },
+        architecture: String = System.getProperty("os.arch", ""),
+    ): String? {
         val suffixes = when {
-            DesktopPlatform.isWindows -> listOf("-windows-x64-setup.exe")
-            DesktopPlatform.isLinux -> listOf(".AppImage", "-linux-amd64.deb")
+            platform == "windows" -> when (architecture.lowercase()) {
+                "aarch64", "arm64" -> listOf(
+                    "-windows-arm64-setup.exe", "-windows-arm64.msi", "-windows-arm64-portable.zip",
+                )
+                "amd64", "x86_64", "x64" -> listOf("-windows-x64-setup.exe")
+                else -> return null
+            }
+            platform == "linux" -> listOf(".AppImage", "-linux-amd64.deb")
             else -> return null
         }
         val assets = release["assets"]?.jsonArray?.mapNotNull { it as? JsonObject }.orEmpty()

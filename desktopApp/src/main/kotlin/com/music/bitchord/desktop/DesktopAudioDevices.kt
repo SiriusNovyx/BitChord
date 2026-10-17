@@ -3,6 +3,9 @@ package com.music.bitchord.desktop
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.DataLine
 import javax.sound.sampled.Mixer
@@ -37,16 +40,26 @@ internal object DesktopAudioDevices {
     /** Bumped whenever the system's set of outputs changes; lists keyed on it re-enumerate. */
     val changes: StateFlow<Int> = _changes
 
-    internal fun systemChanged() = _changes.update { it + 1 }
+    private val catalog = DesktopAudioDeviceCatalog(
+        CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        discover = ::discover,
+        onChanged = { _changes.update { it + 1 } },
+    )
+
+    internal fun systemChanged() = catalog.refresh()
+
+    internal fun refresh() = catalog.refresh()
 
     /**
-     * Every output that can actually play audio, newest enumeration each call.
+     * The last complete discovery result. Native drivers must never be called by UI readers.
      *
      * On Windows these are WASAPI endpoints keyed by endpoint id — what the native sink opens —
      * rather than Java Sound mixers, whose names only loosely match an endpoint and include
      * entries such as "Primary Sound Driver" that no endpoint answers to.
      */
-    fun available(): List<DesktopAudioDevice> {
+    fun available(): List<DesktopAudioDevice> = catalog.devices.value
+
+    private fun discover(): List<DesktopAudioDevice> {
         if (DesktopPlatform.isWindows) {
             DesktopWindowsAudio.devices()?.let { endpoints ->
                 adoptLegacyChoice(endpoints)

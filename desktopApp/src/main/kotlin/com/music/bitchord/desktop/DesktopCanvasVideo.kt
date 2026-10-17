@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,6 +52,7 @@ import kotlin.math.roundToInt
 @Composable
 internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
     val canvas = spec.canvas
+    val visualPolicy by DesktopPerformance.policy.collectAsState()
     var frame by remember(canvas) { mutableStateOf<ImageBitmap?>(null) }
     val rendered = frame != null
     val running by rememberUpdatedState(spec.isPlaying && !spec.pausedForTransition)
@@ -60,7 +62,8 @@ internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
     val reportCover by rememberUpdatedState(spec.onCoverChanged)
     val presentationAlpha by rememberUpdatedState(spec.presentationAlpha)
 
-    LaunchedEffect(canvas) {
+    LaunchedEffect(canvas, visualPolicy.animateArtwork) {
+        if (!visualPolicy.animateArtwork) return@LaunchedEffect
         // Round and round for as long as the clip is mounted: a canvas is a few
         // seconds long, and the decoder cannot be relied on to rewind an HLS
         // manifest itself, so each pass reopens it.
@@ -119,8 +122,8 @@ internal fun DesktopCanvasVideo(spec: CanvasVideoSpec, modifier: Modifier) {
 
     // One frame once there is one, and then — for a caller re-tinting off the
     // clip — another every so often.
-    LaunchedEffect(rendered, spec.refreshFrameEveryMs) {
-        if (!rendered) return@LaunchedEffect
+    LaunchedEffect(rendered, spec.refreshFrameEveryMs, visualPolicy.animateArtwork) {
+        if (!rendered || !visualPolicy.animateArtwork) return@LaunchedEffect
         frame?.let(reportFrame)
         val interval = spec.refreshFrameEveryMs ?: return@LaunchedEffect
         while (isActive) {

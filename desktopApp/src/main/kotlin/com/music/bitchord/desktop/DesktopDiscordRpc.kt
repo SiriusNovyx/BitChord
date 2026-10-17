@@ -23,6 +23,9 @@ import java.util.Base64
 import java.util.Locale
 import java.util.UUID
 
+internal fun discordPlaybackRevision(state: DesktopPlaybackState, speed: Float): String? =
+    state.song?.let { "${it.videoId}|${state.durationMs}|$speed|${state.isPlaying}|${state.seeks}|${state.awaitingAudio}" }
+
 /**
  * Publishes what is playing to Discord as a Rich Presence activity.
  *
@@ -123,7 +126,7 @@ internal object DesktopDiscordRpc {
             clear()
             return
         }
-        val key = "${song.videoId}|${state.durationMs}|$speed"
+        val key = discordPlaybackRevision(state, speed)
         if (key == lastKey) return
         lastKey = key
         val position = state.positionMs

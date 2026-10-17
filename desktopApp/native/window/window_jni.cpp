@@ -4,8 +4,10 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <commctrl.h>
 #include <audioclient.h>
 #include <dwmapi.h>
+#include <propkeydef.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <mmdeviceapi.h>
 #include <propvarutil.h>
@@ -29,6 +31,7 @@ WNDPROC g_original_proc = nullptr;
 
 // Posted from Java to start a caption drag on the thread that owns the window; see frame_proc.
 constexpr UINT WM_BITCHORD_DRAG = WM_APP + 0x42;
+constexpr UINT WM_BITCHORD_INSTALL_CANVAS = WM_APP + 0x43;
 // SC_MOVE through the caption: the same move loop a real title bar starts.
 constexpr WPARAM SC_DRAGMOVE = SC_MOVE | HTCAPTION;
 
@@ -68,7 +71,57 @@ int resize_border(HWND window, bool horizontal) {
     return frame + padding;
 }
 
+LRESULT resize_hit(HWND window, LPARAM position) {
+    if (!IsWindow(window) || IsZoomed(window)) return HTCLIENT;
+    POINT point{GET_X_LPARAM(position), GET_Y_LPARAM(position)};
+    RECT bounds{};
+    if (!GetWindowRect(window, &bounds)) return HTCLIENT;
+    const int border_x = resize_border(window, true);
+    const int border_y = resize_border(window, false);
+    const bool left = point.x < bounds.left + border_x;
+    const bool right = point.x >= bounds.right - border_x;
+    const bool top = point.y < bounds.top + border_y;
+    const bool bottom = point.y >= bounds.bottom - border_y;
+    if (top && left) return HTTOPLEFT;
+    if (top && right) return HTTOPRIGHT;
+    if (bottom && left) return HTBOTTOMLEFT;
+    if (bottom && right) return HTBOTTOMRIGHT;
+    if (left) return HTLEFT;
+    if (right) return HTRIGHT;
+    if (top) return HTTOP;
+    if (bottom) return HTBOTTOM;
+    return HTCLIENT;
+}
+
+LRESULT CALLBACK canvas_resize_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam,
+    UINT_PTR subclass_id, DWORD_PTR frame) {
+    // AWT's canvas covers the whole client area and otherwise consumes the frame's resize edges.
+    if (message == WM_NCHITTEST && resize_hit(reinterpret_cast<HWND>(frame), lparam) != HTCLIENT) {
+        return HTTRANSPARENT;
+    }
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(window, canvas_resize_proc, subclass_id);
+    return DefSubclassProc(window, message, wparam, lparam);
+}
+
+BOOL CALLBACK install_canvas_subclass(HWND window, LPARAM frame) {
+    wchar_t class_name[64]{};
+    GetClassNameW(window, class_name, 64);
+    if (wcscmp(class_name, L"SunAwtCanvas") == 0 &&
+        GetWindowThreadProcessId(window, nullptr) == GetCurrentThreadId()) {
+        SetWindowSubclass(window, canvas_resize_proc, 1, static_cast<DWORD_PTR>(frame));
+    }
+    return TRUE;
+}
+
 LRESULT CALLBACK frame_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == WM_BITCHORD_INSTALL_CANVAS) {
+        // Subclass helpers must run on the native thread that owns both AWT windows.
+        EnumChildWindows(window, install_canvas_subclass, reinterpret_cast<LPARAM>(window));
+        return 0;
+    }
+    if (message == WM_PARENTNOTIFY && LOWORD(wparam) == WM_CREATE) {
+        install_canvas_subclass(reinterpret_cast<HWND>(lparam), reinterpret_cast<LPARAM>(window));
+    }
     if (message == WM_NCCALCSIZE && wparam == TRUE) {
         // Keep the native overlapped-window styles but give the full surface to Compose. DWM still
         // owns the outer frame, shadow and transitions; only the standard caption is removed.
@@ -86,24 +139,9 @@ LRESULT CALLBACK frame_proc(HWND window, UINT message, WPARAM wparam, LPARAM lpa
         return 0;
     }
 
-    if (message == WM_NCHITTEST && !IsZoomed(window)) {
-        POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
-        RECT bounds{};
-        GetWindowRect(window, &bounds);
-        const int border_x = resize_border(window, true);
-        const int border_y = resize_border(window, false);
-        const bool left = point.x < bounds.left + border_x;
-        const bool right = point.x >= bounds.right - border_x;
-        const bool top = point.y < bounds.top + border_y;
-        const bool bottom = point.y >= bounds.bottom - border_y;
-        if (top && left) return HTTOPLEFT;
-        if (top && right) return HTTOPRIGHT;
-        if (bottom && left) return HTBOTTOMLEFT;
-        if (bottom && right) return HTBOTTOMRIGHT;
-        if (left) return HTLEFT;
-        if (right) return HTRIGHT;
-        if (top) return HTTOP;
-        if (bottom) return HTBOTTOM;
+    if (message == WM_NCHITTEST) {
+        const LRESULT hit = resize_hit(window, lparam);
+        if (hit != HTCLIENT) return hit;
     }
 
     if (message == WM_BITCHORD_DRAG) {
@@ -174,6 +212,7 @@ bool install_frame(HWND window) {
     SetWindowPos(
         window, nullptr, 0, 0, 0, 0,
         SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SendMessageW(window, WM_BITCHORD_INSTALL_CANVAS, 0, 0);
     return true;
 }
 
@@ -241,8 +280,10 @@ std::wstring g_audio_error;
 
 // Set from the notification thread; read by the playback thread on its next write.
 std::atomic<bool> g_audio_reroute{false};
+bool g_audio_force_reopen = false;
 IMMDeviceEnumerator* g_audio_enumerator = nullptr;
-bool g_audio_watching = false;
+IMMDeviceEnumerator* g_notification_enumerator = nullptr;
+std::mutex g_notification_mutex;
 JavaVM* g_vm = nullptr;
 
 class ComScope {
@@ -320,15 +361,36 @@ private:
 
 EndpointWatcher g_audio_watcher;
 
+void keep_audio_mta_alive() {
+    static CO_MTA_USAGE_COOKIE mta = [] {
+        CO_MTA_USAGE_COOKIE cookie = nullptr;
+        CoIncrementMTAUsage(&cookie);
+        return cookie;
+    }();
+    (void)mta;
+}
+
+void ensure_device_watcher() {
+    std::lock_guard<std::mutex> guard(g_notification_mutex);
+    if (g_notification_enumerator != nullptr) return;
+    keep_audio_mta_alive();
+    IMMDeviceEnumerator* enumerator = nullptr;
+    if (SUCCEEDED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+        __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator))) && enumerator != nullptr) {
+        if (SUCCEEDED(enumerator->RegisterEndpointNotificationCallback(&g_audio_watcher))) {
+            g_notification_enumerator = enumerator;
+        } else {
+            enumerator->Release();
+        }
+    }
+}
+
 /**
- * The enumerator every audio call shares, created once and kept with the notification client
- * registered on it. CoIncrementMTAUsage keeps the multithreaded apartment — and so the enumerator
- * — alive between calls, which each enter and leave it.
+ * Playback's enumerator. UI discovery uses its own instance and never takes the playback lock.
  */
 IMMDeviceEnumerator* enumerator_locked() {
     if (g_audio_enumerator != nullptr) return g_audio_enumerator;
-    static CO_MTA_USAGE_COOKIE mta = nullptr;
-    if (mta == nullptr) CoIncrementMTAUsage(&mta);
+    keep_audio_mta_alive();
     const HRESULT status = CoCreateInstance(
         __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
         __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&g_audio_enumerator));
@@ -336,9 +398,6 @@ IMMDeviceEnumerator* enumerator_locked() {
         g_audio_enumerator = nullptr;
         set_audio_error(L"Audio endpoint discovery", status);
         return nullptr;
-    }
-    if (!g_audio_watching) {
-        g_audio_watching = SUCCEEDED(g_audio_enumerator->RegisterEndpointNotificationCallback(&g_audio_watcher));
     }
     return g_audio_enumerator;
 }
@@ -370,6 +429,7 @@ void release_audio_locked() {
     g_audio_played_offset = 0;
     g_audio_wanted.clear();
     g_audio_reroute = false;
+    g_audio_force_reopen = false;
 }
 
 std::wstring property_string(IMMDevice* device, const PROPERTYKEY& key) {
@@ -532,11 +592,11 @@ void remember_played_and_reset_locked() {
  * Moves the stream to wherever the request resolves now. What was queued on the old endpoint is
  * dropped — a fifth of a second at most — and only what was actually heard is counted as played.
  */
-void reroute_locked() {
+void reroute_locked(bool force_reopen = false) {
     g_audio_reroute = false;
     if (g_audio_channels == 0) return;
     IMMDevice* device = resolve_device_locked(g_audio_wanted);
-    if (device != nullptr && g_audio_client != nullptr && endpoint_id(device) == g_audio_endpoint_id) {
+    if (!force_reopen && device != nullptr && g_audio_client != nullptr && endpoint_id(device) == g_audio_endpoint_id) {
         device->Release();
         return;
     }
@@ -560,6 +620,7 @@ int open_audio(const std::wstring& wanted, int sample_rate, int channels, int by
         set_audio_error(L"COM initialization", com.result);
         return 0;
     }
+    ensure_device_watcher();
 
     IMMDevice* device = resolve_device_locked(wanted);
     if (device == nullptr) {
@@ -582,7 +643,8 @@ int open_audio(const std::wstring& wanted, int sample_rate, int channels, int by
     return static_cast<int>(g_audio_buffer_frames * g_audio_channels * g_audio_bytes_per_sample);
 }
 
-int write_audio(const float* samples, int sample_count, float gain) {
+int write_audio(const float* samples, int sample_count, float gain,
+    void (*reroute)(bool) = reroute_locked) {
     if (samples == nullptr || sample_count <= 0) return 0;
     std::unique_lock<std::mutex> guard(g_audio_mutex);
     ComScope com;
@@ -590,8 +652,20 @@ int write_audio(const float* samples, int sample_count, float gain) {
 
     const UINT32 total_frames = static_cast<UINT32>(sample_count) / g_audio_channels;
     UINT32 frame_at = 0;
+    ULONGLONG last_progress = GetTickCount64();
     while (frame_at < total_frames) {
-        if (g_audio_reroute || g_audio_client == nullptr) reroute_locked();
+        // A stalled/invalidated Bluetooth client must yield back to the pump for pause/seek/quit.
+        if (GetTickCount64() - last_progress >= 1000) {
+            g_audio_error = L"WASAPI stopped accepting samples; reopening the endpoint";
+            g_audio_force_reopen = true;
+            g_audio_reroute = true;
+            break;
+        }
+        if (g_audio_reroute || g_audio_client == nullptr) {
+            const bool force_reopen = g_audio_force_reopen;
+            g_audio_force_reopen = false;
+            reroute(force_reopen);
+        }
         if (g_audio_client == nullptr) {
             // Nowhere to play. Let the rest of the block pass in real time, counted as played, so
             // the track neither races ahead nor wedges this thread until a device appears.
@@ -606,13 +680,15 @@ int write_audio(const float* samples, int sample_count, float gain) {
         }
         UINT32 padding = 0;
         HRESULT status = g_audio_client->GetCurrentPadding(&padding);
-        if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
+        if (status == AUDCLNT_E_DEVICE_INVALIDATED || status == AUDCLNT_E_RESOURCES_INVALIDATED) {
             // Unplugged between the notification and this write; move on right away.
-            g_audio_reroute = true;
+            reroute(true);
             continue;
         }
         if (FAILED(status)) {
             set_audio_error(L"Reading WASAPI buffer state", status);
+            g_audio_force_reopen = true;
+            g_audio_reroute = true;
             break;
         }
         const UINT32 available = padding < g_audio_buffer_frames ? g_audio_buffer_frames - padding : 0;
@@ -625,12 +701,14 @@ int write_audio(const float* samples, int sample_count, float gain) {
         const UINT32 frames = std::min(available, total_frames - frame_at);
         BYTE* target = nullptr;
         status = g_audio_render->GetBuffer(frames, &target);
-        if (status == AUDCLNT_E_DEVICE_INVALIDATED) {
-            g_audio_reroute = true;
+        if (status == AUDCLNT_E_DEVICE_INVALIDATED || status == AUDCLNT_E_RESOURCES_INVALIDATED) {
+            reroute(true);
             continue;
         }
         if (FAILED(status) || target == nullptr) {
             set_audio_error(L"Acquiring the WASAPI buffer", status);
+            g_audio_force_reopen = true;
+            g_audio_reroute = true;
             break;
         }
         const size_t first = static_cast<size_t>(frame_at) * g_audio_channels;
@@ -656,20 +734,27 @@ int write_audio(const float* samples, int sample_count, float gain) {
         status = g_audio_render->ReleaseBuffer(frames, 0);
         if (FAILED(status)) {
             set_audio_error(L"Submitting the WASAPI buffer", status);
+            g_audio_force_reopen = true;
+            g_audio_reroute = true;
             break;
         }
         frame_at += frames;
+        last_progress = GetTickCount64();
         g_audio_submitted_frames += frames;
     }
     return static_cast<int>(frame_at * g_audio_channels * g_audio_bytes_per_sample);
 }
 
-jobjectArray list_devices(JNIEnv* env) {
+std::vector<std::wstring> discover_device_values() {
     std::vector<std::wstring> values;
     {
-        std::lock_guard<std::mutex> guard(g_audio_mutex);
         ComScope com;
-        IMMDeviceEnumerator* enumerator = com.ready() ? enumerator_locked() : nullptr;
+        IMMDeviceEnumerator* enumerator = nullptr;
+        if (com.ready()) {
+            ensure_device_watcher();
+            CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(&enumerator));
+        }
         IMMDeviceCollection* devices = nullptr;
         if (enumerator != nullptr &&
             SUCCEEDED(enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devices)) &&
@@ -685,7 +770,18 @@ jobjectArray list_devices(JNIEnv* env) {
             }
             devices->Release();
         }
+        if (enumerator != nullptr) enumerator->Release();
     }
+    return values;
+}
+
+std::wstring device_name_snapshot() {
+    std::unique_lock<std::mutex> guard(g_audio_mutex, std::try_to_lock);
+    return guard.owns_lock() ? g_audio_device_name : std::wstring();
+}
+
+jobjectArray list_devices(JNIEnv* env) {
+    const auto values = discover_device_values();
     jclass string_type = env->FindClass("java/lang/String");
     jobjectArray result = env->NewObjectArray(static_cast<jsize>(values.size()), string_type, nullptr);
     for (size_t index = 0; index < values.size(); ++index) {
@@ -797,7 +893,11 @@ Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeResume(JNIEnv*, jclass
     if (g_audio_started && !g_audio_reroute) return;
     ComScope com;
     // A device change while paused is acted on here, before anything is heard on the old one.
-    if (g_audio_reroute) reroute_locked();
+    if (g_audio_reroute) {
+        const bool force_reopen = g_audio_force_reopen;
+        g_audio_force_reopen = false;
+        reroute_locked(force_reopen);
+    }
     if (!g_audio_started) {
         g_audio_started = true;
         if (g_audio_client != nullptr) g_audio_client->Start();
@@ -838,10 +938,9 @@ Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeClose(JNIEnv*, jclass)
 
 JNIEXPORT jstring JNICALL
 Java_com_music_bitchord_desktop_DesktopWindowsAudio_nativeDeviceName(JNIEnv* env, jclass) {
-    std::lock_guard<std::mutex> guard(g_audio_mutex);
+    const auto name = device_name_snapshot();
     return env->NewString(
-        reinterpret_cast<const jchar*>(g_audio_device_name.c_str()),
-        static_cast<jsize>(g_audio_device_name.size()));
+        reinterpret_cast<const jchar*>(name.c_str()), static_cast<jsize>(name.size()));
 }
 
 JNIEXPORT jstring JNICALL

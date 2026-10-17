@@ -19,6 +19,12 @@ endif()
 
 project(bitchord_analysis LANGUAGES CXX)
 
+if(BITCHORD_TARGET_ARCH STREQUAL "arm64")
+    if(NOT MSVC OR NOT CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
+        message(FATAL_ERROR "Windows ARM64 requires MSVC with -A ARM64; x64 MinGW is not supported")
+    endif()
+endif()
+
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
@@ -70,6 +76,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND NOT CMAKE_HOST_WIN32)
 endif()
 
 target_compile_options(bitchord_analysis PRIVATE -O2)
+if(MINGW)
+    target_link_options(bitchord_analysis PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
 
 # `System.mapLibraryName` asks for `bitchord_analysis.dll` on Windows, with no
 # prefix — but MinGW's CMake defaults to the Unix `lib` one, so a cross-built

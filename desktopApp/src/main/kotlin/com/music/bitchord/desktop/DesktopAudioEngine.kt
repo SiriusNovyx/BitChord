@@ -259,6 +259,22 @@ class DesktopPlaybackEngine(
     /** Opens a decoder on [stream], off the audio thread. */
     private suspend fun openTrack(song: Song, stream: DesktopStream, startAtMs: Long): Result<Track> =
         withContext(Dispatchers.IO) {
+            if (song.isNativeSpotify) {
+                return@withContext runCatching {
+                    val source = DesktopSpotifyRuntime.source(song, startAtMs)
+                    try {
+                        kotlinx.coroutines.runInterruptible { source.open() }
+                        val ahead = DesktopDecodeAhead(source,
+                            DesktopPcmFormat(44_100, 2, bytesPerSample = 4, isFloat = true),
+                            (song.durationText.durationSeconds() * 1_000_000).toLong().takeIf { it > 0 },
+                            stream.format, name = "BitChord-Spotify PCM")
+                        Track(song, ahead, stream, startAtMs * 1000)
+                    } catch (failure: Exception) {
+                        source.close()
+                        throw failure
+                    }
+                }
+            }
             val decoder = DesktopAudioDecoder()
             decoder.open(
                 url = stream.url,
@@ -483,7 +499,7 @@ class DesktopPlaybackEngine(
         nextLocalStream = local
         // Measured on YouTube Opus (or the file) whatever will end up serving it, so Automix has
         // its analysis without anything being fetched from the source that will play it.
-        if (automixEnabled && !song.isVideoOrigin) {
+        if (automixEnabled && !song.isVideoOrigin && !song.isNativeSpotify) {
             analyzer.request(song, local, song.durationText.durationSeconds())
         }
         if (local == null && DesktopMusicSources.mayServeFromAddon(song)) {
@@ -1296,7 +1312,7 @@ class DesktopPlaybackEngine(
 
     /** Asks for a track to be analysed, if Automix is on and there is anything to analyse. */
     private fun requestAnalysis(track: Track) {
-        if (!automixEnabled) return
+        if (!automixEnabled || track.song.isNativeSpotify) return
         val seconds = (track.decoder.durationUs ?: 0L) / 1_000_000.0
         val known = seconds.takeIf { it > 0 }
             ?: (track.song.durationText.durationSeconds())
@@ -1309,6 +1325,7 @@ class DesktopPlaybackEngine(
         val next = upcoming
         // A track held back from read-ahead has no decoder yet, but is measured all the same.
         val held = if (next == null) nextSong else null
+        if (track.song.isNativeSpotify || next?.song?.isNativeSpotify == true || held?.isNativeSpotify == true) return
         if (track.song.isVideoOrigin || next?.song?.isVideoOrigin == true || held?.isVideoOrigin == true) return
         requestAnalysis(track)
         next?.let(::requestAnalysis)

@@ -40,11 +40,14 @@ internal object DesktopAutoplay {
         currentIndex == itemCount - 1
 
     /** The YouTube id to seed a station on. */
-    suspend fun youtubeSeedFor(song: Song): String? {
+    suspend fun youtubeSeedFor(song: Song,
+        search: suspend (String) -> Result<List<SearchResult>> = { DesktopSearchClient.search(it, SearchFilter.SONGS) },
+    ): String? {
+        if (song.isNativeSpotify) return null
         if (DesktopMusicSources.hasYouTubeOriginal(song)) return song.videoId
         val query = DesktopTrackMatcher.queries(song).firstOrNull() ?: return null
         // YouTube specifically, not the configured sources.
-        return DesktopSearchClient.search(query, SearchFilter.SONGS)
+        return search(query)
             .getOrNull()
             ?.mapNotNull { result ->
                 when (result) {
@@ -63,6 +66,7 @@ internal object DesktopAutoplay {
         seedSong: Song,
         limit: Int = MAX_QUEUED_AUTOPLAY,
     ): Result<List<Song>> {
+        if (seedSong.isNativeSpotify) return Result.failure(IllegalStateException("Spotify radio is unavailable in this player."))
         val seed = youtubeSeedFor(seedSong)
         if (seed == null) {
             DesktopTrackLog.log("autoplay: no YouTube match to seed a station on for '${seedSong.title}'")

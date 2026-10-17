@@ -4,6 +4,9 @@ import java.awt.Desktop
 import java.awt.EventQueue
 import java.awt.Frame
 import java.awt.Window
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
+import java.awt.event.WindowStateListener
 import java.awt.desktop.AppReopenedListener
 import java.lang.ref.WeakReference
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +19,19 @@ internal object DesktopWindowVisibility {
 
     /** What the window's own `visible` is driven from. */
     val visible: StateFlow<Boolean> = _visible
+    private val _visualActive = MutableStateFlow(true)
+    val visualActive: StateFlow<Boolean> = _visualActive
+    private val componentListener = object : ComponentAdapter() {
+        override fun componentShown(event: ComponentEvent) = updateVisualActivity()
+        override fun componentHidden(event: ComponentEvent) = updateVisualActivity()
+    }
+    private val stateListener = WindowStateListener { updateVisualActivity() }
+
+    private fun updateVisualActivity() {
+        val window = windowRef?.get()
+        val minimized = window is Frame && (window.extendedState and Frame.ICONIFIED) != 0
+        _visualActive.value = _visible.value && window?.isVisible == true && !minimized
+    }
 
     /** Whether a close should hide rather than quit. */
     @Volatile
@@ -26,7 +42,14 @@ internal object DesktopWindowVisibility {
 
     /** Attaches the active Compose window so show() can bring it to the foreground. */
     fun attachWindow(window: Window) {
+        val previous = windowRef?.get()
+        if (previous === window) return
+        previous?.removeComponentListener(componentListener)
+        (previous as? Frame)?.removeWindowStateListener(stateListener)
         windowRef = WeakReference(window)
+        window.addComponentListener(componentListener)
+        (window as? Frame)?.addWindowStateListener(stateListener)
+        updateVisualActivity()
     }
 
     /**
@@ -66,6 +89,7 @@ internal object DesktopWindowVisibility {
                 win.isVisible = true
                 win.toFront()
                 win.requestFocus()
+                updateVisualActivity()
             }
             if (DesktopPlatform.isMac) {
                 runCatching {
@@ -88,6 +112,7 @@ internal object DesktopWindowVisibility {
         // the app having broken rather than as it having been hidden.
         DesktopWindowMode.exit()
         _visible.value = false
+        _visualActive.value = false
         DesktopTrackLog.log("window closed to the tray; playback continues")
         return false
     }

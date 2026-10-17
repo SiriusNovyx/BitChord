@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -23,6 +24,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -52,7 +55,8 @@ internal fun DesktopPlayerSheet(
     if (visible) mounted = true
     if (!mounted) return
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val keyboardFocus = remember { FocusRequester() }
+    BoxWithConstraints(Modifier.fillMaxSize().focusRequester(keyboardFocus).focusable()) {
         val windowWidth = maxWidth
         val windowHeight = maxHeight
         val heightPx = with(LocalDensity.current) { maxHeight.toPx() }
@@ -61,6 +65,7 @@ internal fun DesktopPlayerSheet(
 
         LaunchedEffect(visible) {
             if (visible) {
+                keyboardFocus.requestFocus()
                 offset.animateTo(0f, tween(SHEET_OPEN_MS, easing = FastOutSlowInEasing))
             } else {
                 offset.animateTo(heightPx, tween(SHEET_CLOSE_MS, easing = FastOutSlowInEasing))

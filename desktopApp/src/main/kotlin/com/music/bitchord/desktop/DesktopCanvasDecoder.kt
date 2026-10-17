@@ -16,6 +16,7 @@ import org.bytedeco.ffmpeg.global.avcodec.avcodec_open2
 import org.bytedeco.ffmpeg.global.avcodec.avcodec_parameters_to_context
 import org.bytedeco.ffmpeg.global.avcodec.avcodec_receive_frame
 import org.bytedeco.ffmpeg.global.avcodec.avcodec_send_packet
+import org.bytedeco.ffmpeg.global.avcodec.AVDISCARD_ALL
 import org.bytedeco.ffmpeg.global.avformat.av_find_best_stream
 import org.bytedeco.ffmpeg.global.avformat.av_read_frame
 import org.bytedeco.ffmpeg.global.avformat.av_seek_frame
@@ -67,7 +68,13 @@ internal class DesktopCanvasDecoder {
     var height: Int = 0
         private set
 
-    fun open(url: String, headers: Map<String, String> = emptyMap()): Result<Unit> = runCatching {
+    fun open(url: String, headers: Map<String, String> = emptyMap()): Result<Unit> {
+        val source = DesktopCanvasHls.resolve(url, MAX_EDGE, headers)
+        val result = openSource(source, headers)
+        return if (result.isFailure && source != url) openSource(url, headers) else result
+    }
+
+    private fun openSource(source: String, headers: Map<String, String>): Result<Unit> = runCatching {
         DesktopAudioDecoder.ensureNetworkReady()
         val options = AVDictionary(null)
         if (headers.isNotEmpty()) {
@@ -81,13 +88,16 @@ internal class DesktopCanvasDecoder {
         av_dict_set(options, "rw_timeout", "15000000", 0)
 
         val opened = AVFormatContext(null)
-        check(avformat_open_input(opened, url, null, options) >= 0) { "could not open the clip" }
+        check(avformat_open_input(opened, source, null, options) >= 0) { "could not open the clip" }
         format = opened
         check(avformat_find_stream_info(opened, null as AVDictionary?) >= 0) { "no stream info" }
         streamIndex = av_find_best_stream(
             opened, AVMEDIA_TYPE_VIDEO, -1, -1, null as org.bytedeco.ffmpeg.avcodec.AVCodec?, 0,
         )
         check(streamIndex >= 0) { "no video stream" }
+        for (index in 0 until opened.nb_streams()) {
+            if (index != streamIndex) opened.streams(index).discard(AVDISCARD_ALL)
+        }
 
         val stream = opened.streams(streamIndex)
         val parameters = stream.codecpar()

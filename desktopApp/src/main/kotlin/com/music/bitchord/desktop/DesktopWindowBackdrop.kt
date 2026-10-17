@@ -26,11 +26,12 @@ internal object DesktopWindowBackdrop {
     internal const val KEY = "window_backdrop"
 
     /**
-     * Whether this window can carry a material: Windows 11 and the native frame. Decided once, at
-     * start, because it decides whether the window is created transparent.
+     * Whether this window can carry a material. The opaque diagnostic override is read once,
+     * because Compose window transparency is fixed at creation.
      */
     val available: Boolean =
         (DesktopPlatform.isWindows && DesktopPlatform.drawsOwnWindowFrame &&
+            !java.lang.Boolean.getBoolean("bitchord.window.opaque") &&
             System.getProperty("os.name").orEmpty().contains("11")) ||
         DesktopPlatform.isMac
 

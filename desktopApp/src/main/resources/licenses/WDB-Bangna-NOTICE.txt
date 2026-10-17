@@ -1,0 +1,18 @@
+WDB Bangna Regular
+Copyright (c) 2013 Worachet Deeyai. All rights reserved.
+
+The unmodified WDB_Bangna.ttf supplied by the user is bundled as a font asset
+for rendering Thai text. It is not relicensed under BitChord's GPLv3 code license.
+SHA256: a304aae6471f3298032923c2342461d6c1934414c71315f69b3cf755396931b6
+
+Author's release: https://www.f0nt.com/release/wdb-bangna/
+Published terms: https://www.f0nt.com/about/license/
+Author's discussion: https://forum.f0nt.com/index.php/topic,21541.0.html
+
+The release permits free commercial use. The linked terms permit attaching a
+font to a program for correct rendering and user convenience. They prohibit
+selling the font itself or providing it as an independent font download.
+Redistributing a modified font requires the author's permission.
+These notes summarize the linked terms; the original terms remain authoritative.
+
+The font file has not been modified or subsetted. Keep this notice with the app.

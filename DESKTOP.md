@@ -6,6 +6,10 @@ the supported Compose Multiplatform desktop model.
 
 The desktop target uses Java 21.
 
+The opt-in [build infrastructure candidate](docs/desktop-java25.md) uses Java 25,
+Gradle 9.5.1 and AGP 9.3 while retaining Java 21 desktop and Java 17 Android/shared
+bytecode. The original wrapper remains the default until validation is complete.
+
 On macOS (Apple Silicon or Intel), run it with a Java 21 JDK available in your environment:
 
 ```bash
@@ -27,7 +31,7 @@ running `gradlew.bat :desktopApp:run`.
 
 ## Installing a release
 
-Every download on the [releases page](https://github.com/kushagrasinghx/BitChord/releases) carries its own Java
+Every download on the [releases page](https://github.com/SiriusNovyx/BitChord/releases) carries its own Java
 runtime, the FFmpeg and ONNX natives, the Automix analyser and its models.
 Nothing else has to be installed first — no JDK, no codec pack.
 
@@ -41,7 +45,7 @@ Nothing else has to be installed first — no JDK, no codec pack.
 | Linux | `BitChord-<version>-linux-x86_64.rpm` | `sudo dnf install ./BitChord-*.rpm` on Fedora, RHEL and openSUSE. |
 | Windows | `BitChord-<version>-windows-x64-setup.exe` | The ordinary installer. Installs for the current user, so it never asks for an administrator. |
 | Windows | `BitChord-<version>-windows-x64.msi` | The same thing for anyone who deploys by MSI. |
-| Windows | `BitChord-<version>-windows-x64-portable.zip` | Unzip anywhere and run `BitChord.exe`. Writes nothing outside the folder. |
+| Windows | `BitChord-<version>-windows-x64-portable.zip` | Unzip and run `BitChord.exe`. Release app images use normal OS preferences and user-directory caches. |
 
 **macOS Gatekeeper.** Unsigned binaries built locally or downloaded outside the Mac App Store
 may trigger a macOS security prompt ("BitChord is damaged and can't be opened" or "unidentified developer").
@@ -54,6 +58,43 @@ xattr -cr /Applications/BitChord.app
 The Linux packages are built on Ubuntu 22.04 against its glibc, so they install
 on that release and anything newer.
 
+### Windows ARM64 development
+
+See [the ARM64 build and verification commands](docs/windows-arm64.md). A native
+ARM64 portable package now bundles Java 21, Skiko, FFmpeg JNI, ONNX, QuickJS and
+the Windows bridges. It has launched and played music on Windows ARM64. The
+ARM64 browser adapter uses the installed Edge WebView2 Runtime; other platforms
+keep JavaFX. Existing x64 packages remain supported through their original
+dependency graph. Installer and release CI validation is still pending.
+
+### Portable data
+
+`-Dbitchord.dataDir=<writable directory>` opts into file-backed preferences and
+app-owned caches, extracted Skiko/JavaCPP natives, analyses, logs and downloads under that directory. Pass it
+before startup; normal installations retain their existing OS-backed storage.
+No existing preferences or credentials are migrated or deleted. The custom
+`windowsPortable` launchers select `data` beside themselves and keep Java's
+temporary directory there. The ARM64 ZIP includes a native `BitChord.exe` and
+its runtime. This is distinct from the release workflow's zipped
+jpackage app image. It is not a sandbox: explicitly chosen music/browser files,
+OS credential facilities and third-party runtime state can still involve other
+locations. Windows DPAPI credentials remain tied to the Windows user.
+
+### Visual performance
+
+Desktop playback settings offer Efficient, Balanced (default) and Performance.
+Efficient uses static artwork and reduced effects. Balanced and Performance
+retain foreground effects; purely visual canvas work pauses when the window is
+hidden or minimized in every mode. Audio decoding, downloads and analysis are
+not governed by this policy. Covered-but-visible windows are not yet detected.
+
+For controlled runs, `:desktopApp:run -Pbitchord.performance=efficient` sets the
+process's mode; `-Pbitchord.dataDir=.work/test-data` isolates test preferences.
+Use `desktopApp/packaging/Measure-DesktopPerformance.ps1` with the app process ID
+and a scenario to record CPU cores used, memory and per-engine GPU counters.
+The collector does not measure energy consumption. Compare identical tracks,
+screens, window sizes, visual settings and AC/battery states after warm-up.
+
 **Linux system libraries.** The packages carry their own Java runtime and codecs
 but not the desktop's own graphics stack, and jpackage cannot derive that list —
 so the deb and rpm declare only `xdg-utils`. Any machine running a desktop
@@ -61,12 +102,12 @@ session already has what is needed (GTK 3, X11 or XWayland, GL, ALSA); a minimal
 or headless install does not, and will fail at startup rather than at install
 time.
 
-**Windows and the Visual C++ runtime.** The Automix analyser is linked against a
-static C runtime, so on almost every machine there is nothing to install. If
-BitChord starts but Automix never analyses anything, install the
-[Microsoft Visual C++ 2015–2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-and restart it — that is the one dependency the bundled runtime cannot carry
-itself, because Windows expects it to be a system component.
+**Windows native dependencies.** The project bridges use a static C runtime;
+their architecture must match the JVM. The ARM64 preparation scripts verify
+each selected DLL and retain the ARM64 VC runtime files needed by JavaCPP.
+Windows 11 supplies UCRT. Do not install an x64 runtime to repair an ARM64
+library-loading error: check the failing component and architecture first.
+The ARM64 browser adapter also requires the Edge WebView2 Runtime.
 
 ## Building the packages yourself
 

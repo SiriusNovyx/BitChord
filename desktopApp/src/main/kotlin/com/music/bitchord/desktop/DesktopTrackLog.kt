@@ -16,7 +16,7 @@ internal object DesktopTrackLog {
         runCatching {
             val state = System.getenv("XDG_STATE_HOME")?.takeIf { it.isNotBlank() }
                 ?: "${System.getProperty("user.home")}/.local/state"
-            val directory = Path.of(state, "bitchord")
+            val directory = DesktopStorage.directory("logs") { Path.of(state, "bitchord") }
             Files.createDirectories(directory)
             directory.resolve("desktop.log")
         }.getOrNull()

@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.20)
+project(BitChordBatteryProbe LANGUAGES CXX)
+add_executable(battery_probe battery_probe.cpp)
+target_compile_features(battery_probe PRIVATE cxx_std_17)
+target_link_libraries(battery_probe PRIVATE setupapi)
+set_property(TARGET battery_probe PROPERTY MSVC_RUNTIME_LIBRARY MultiThreaded)

@@ -32,11 +32,13 @@ object DesktopStrings {
         DesktopLanguage("pl", "Polski"),
         DesktopLanguage("pt", "Português"),
         DesktopLanguage("ru", "Русский"),
+        DesktopLanguage("th", "ไทย"),
         DesktopLanguage("tr", "Türkçe"),
         DesktopLanguage("zh-Hans", "简体中文"),
         DesktopLanguage("zh-Hant", "繁體中文"),
     )
 
+    private val UNICODE_ESCAPE = Regex("""\\u([0-9a-fA-F]{4})""")
     private val english: Map<String, String> by lazy { catalogue("en") }
 
     @Volatile
@@ -52,8 +54,9 @@ object DesktopStrings {
     }
 
     /** Which catalogue is actually in use, after the system default is resolved. */
-    fun resolvedTag(): String {
-        val chosen = _language.value
+    fun resolvedTag(): String = resolvedTag(_language.value)
+
+    private fun resolvedTag(chosen: String): String {
         // Migrate legacy single "zh" (Simplified) to explicit script tag.
         if (chosen.isNotBlank()) {
             if (chosen == "zh") return "zh-Hans"
@@ -88,8 +91,8 @@ object DesktopStrings {
 
     fun setLanguage(tag: String) {
         DesktopPersistence().saveString(KEY_LANGUAGE, tag)
+        current = catalogue(resolvedTag(tag))
         _language.value = tag
-        current = catalogue(resolvedTag())
     }
 
     /** The label shown for the stored choice. */
@@ -139,8 +142,6 @@ object DesktopStrings {
         val decoded = UNICODE_ESCAPE.replace(raw) { it.groupValues[1].toInt(16).toChar().toString() }
         return decoded.replace("\\'", "'").replace("\\\"", "\"").replace("\\n", "\n")
     }
-
-    private val UNICODE_ESCAPE = Regex("""\\u([0-9a-fA-F]{4})""")
 
     internal const val KEY_LANGUAGE = "app_language"
 }
