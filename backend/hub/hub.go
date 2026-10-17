@@ -1,33 +1,97 @@
 package hub
 
 import (
+	"encoding/json"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-// SafeConn wraps *websocket.Conn with a mutex to prevent concurrent write panic.
+// SafeConn serializes immutable frames through a bounded writer queue.
 type SafeConn struct {
-	mu   sync.Mutex
-	conn *websocket.Conn
+	conn        *websocket.Conn
+	frames      chan []byte
+	done        chan struct{}
+	closeOnce   sync.Once
+	queuedBytes atomic.Int64
+	closing     atomic.Bool
 }
 
 func NewSafeConn(conn *websocket.Conn) *SafeConn {
-	return &SafeConn{conn: conn}
+	s := &SafeConn{conn: conn, frames: make(chan []byte, 32), done: make(chan struct{})}
+	go s.writeLoop()
+	return s
 }
 
 func (s *SafeConn) WriteJSON(v interface{}) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_ = s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return s.conn.WriteJSON(v)
+	if s.closing.Load() {
+		return errors.New("websocket is closing")
+	}
+	frame, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	const maxQueuedBytes = 1024 * 1024
+	if s.queuedBytes.Add(int64(len(frame))) > maxQueuedBytes {
+		s.queuedBytes.Add(-int64(len(frame)))
+		_ = s.Close()
+		return errors.New("websocket outbound queue exceeded its byte limit")
+	}
+	select {
+	case <-s.done:
+		s.queuedBytes.Add(-int64(len(frame)))
+		return errors.New("websocket is closed")
+	case s.frames <- frame:
+		return nil
+	default:
+		s.queuedBytes.Add(-int64(len(frame)))
+		_ = s.Close()
+		return errors.New("websocket outbound queue is full")
+	}
+}
+
+func (s *SafeConn) writeLoop() {
+	defer s.Close()
+	for {
+		select {
+		case <-s.done:
+			return
+		case frame := <-s.frames:
+			if frame == nil {
+				return
+			}
+			_ = s.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			err := s.conn.WriteMessage(websocket.TextMessage, frame)
+			s.queuedBytes.Add(-int64(len(frame)))
+			if err != nil {
+				return
+			}
+		}
+	}
 }
 
 func (s *SafeConn) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.conn.Close()
+	// Gorilla permits Close concurrently with all other connection methods.
+	var err error
+	s.closing.Store(true)
+	s.closeOnce.Do(func() { close(s.done); err = s.conn.Close() })
+	return err
+}
+
+// CloseAfterDrain lets an already-enqueued bye frame reach the peer first.
+func (s *SafeConn) CloseAfterDrain() {
+	if !s.closing.CompareAndSwap(false, true) {
+		return
+	}
+	select {
+	case <-s.done:
+	case s.frames <- nil:
+	default:
+		_ = s.Close()
+	}
 }
 
 // Hub coordinates active WebSocket connections across rooms.
@@ -61,20 +125,22 @@ func (h *Hub) Attach(code, memberId string, conn *websocket.Conn) *SafeConn {
 	return sc
 }
 
-func (h *Hub) Detach(code, memberId string, sc *SafeConn) {
+func (h *Hub) Detach(code, memberId string, sc *SafeConn) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	room, ok := h.sockets[code]
 	if !ok {
-		return
+		return false
 	}
-	if room[memberId] == sc {
-		delete(room, memberId)
+	if room[memberId] != sc {
+		return false
 	}
+	delete(room, memberId)
 	if len(room) == 0 {
 		delete(h.sockets, code)
 	}
+	return true
 }
 
 func (h *Hub) DropParty(code string) {
@@ -134,9 +200,13 @@ func (h *Hub) CloseMember(code, memberId string) {
 	h.mu.RLock()
 	room := h.sockets[code]
 	var target *SafeConn
-	if room != nil { target = room[memberId] }
+	if room != nil {
+		target = room[memberId]
+	}
 	h.mu.RUnlock()
-	if target != nil { _ = target.Close() }
+	if target != nil {
+		target.CloseAfterDrain()
+	}
 }
 
 func (h *Hub) Broadcast(code string, payload interface{}, skipMemberId string) {

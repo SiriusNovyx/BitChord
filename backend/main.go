@@ -859,14 +859,15 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(config.WebSocketMaxBytes)
 	_ = conn.SetReadDeadline(time.Now().Add(time.Duration(config.ConnectionIdleMs) * time.Millisecond))
 
-	p.Lock()
-	p.MarkConnected(member, true)
-	p.Unlock()
-
-	sc := hubInst.Attach(p.Code, member.MemberId, conn)
-
 	// Send welcome frame
 	p.Lock()
+	if _, err := p.Authenticate(token); err != nil || p.Members[member.MemberId] != member {
+		p.Unlock()
+		_ = conn.Close()
+		return
+	}
+	sc := hubInst.Attach(p.Code, member.MemberId, conn)
+	p.MarkConnected(member, true)
 	welcome := map[string]interface{}{
 		"type":     protocol.FrameWelcome,
 		"you":      member.ToWire(),
@@ -881,10 +882,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Read loop
 	defer func() {
-		hubInst.Detach(p.Code, member.MemberId, sc)
 		_ = sc.Close()
 
 		p.Lock()
+		if !hubInst.Detach(p.Code, member.MemberId, sc) {
+			p.Unlock()
+			return
+		}
 		p.MarkConnected(member, false)
 		mFrame := membersFrame(p)
 		p.Unlock()
@@ -910,6 +914,9 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 
 	p.Lock()
 	defer p.Unlock()
+	if p.Members[member.MemberId] != member {
+		return
+	}
 	if !p.SpendFrameBudget(member) {
 		_ = sc.WriteJSON(map[string]interface{}{
 			"type": protocol.FrameError, "error": "rate_limited", "message": "Too many messages at once.",
