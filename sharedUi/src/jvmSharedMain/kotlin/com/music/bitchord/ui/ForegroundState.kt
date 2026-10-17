@@ -6,9 +6,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.compositionLocalOf
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+
+/** Hosts can suspend visual work when a window is hidden without stopping playback. */
+val LocalVisualActivity = compositionLocalOf { true }
 
 /**
  * Whether the app is actually on screen.
@@ -49,5 +53,5 @@ fun rememberIsForeground(): Boolean {
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    return foreground
+    return foreground && LocalVisualActivity.current
 }
