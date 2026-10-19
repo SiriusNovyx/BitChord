@@ -20,6 +20,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -113,6 +115,13 @@ object LyricsTranslation {
         val texts: List<String>,
     )
 
+    private data class ResolvedText(val entry: CachedTranslation, val fromCache: Boolean)
+    private val requests = LyricsRequestCoalescer<ResolvedText?>()
+
+    private suspend fun cachedText(key: String, slots: Int): CachedTranslation? =
+        (memory.get(key) ?: readCache(key)?.also { memory.put(key, it) })
+            ?.takeIf { it.version == CACHE_VERSION && it.texts.size == slots }
+
     private data class TextSlot(
         val lineIndex: Int,
         val background: Boolean,
@@ -162,6 +171,16 @@ object LyricsTranslation {
             }
         }
 
+        val answer = requests.run("translate:$cacheKey") {
+            cachedText(cacheKey, slots.size)?.let { ResolvedText(it, true) }
+                ?: fetchTranslation(cacheKey, target, slots)?.let { ResolvedText(it, false) }
+        } ?: return Result.Unavailable
+        val entry = answer.entry
+        return if (sameLanguage(entry.sourceLanguage, target)) Result.SameLanguage(entry.sourceLanguage)
+        else Result.Translated(rebuild(lines, slots, entry.texts), entry.sourceLanguage, answer.fromCache)
+    }
+
+    private suspend fun fetchTranslation(cacheKey: String, target: String, slots: List<TextSlot>): CachedTranslation? {
         val batches = batches(slots)
         val answers = coroutineScope {
             // Two short requests at a time keeps a long lyric fast without
@@ -170,17 +189,17 @@ object LyricsTranslation {
                 group.map { batch -> async { requestBatch(batch, target) } }.awaitAll()
             }
         }
-        if (answers.any { it == null }) return Result.Unavailable
+        if (answers.any { it == null }) return null
         val complete = answers.filterNotNull()
         val source = complete
             .groupBy { canonicalLanguage(it.sourceLanguage) }
             .maxByOrNull { (_, values) -> values.sumOf { it.sourceWeight } }
             ?.key
             .orEmpty()
-        if (source.isBlank()) return Result.Unavailable
+        if (source.isBlank()) return null
 
         var translated = complete.flatMap { it.translations }
-        if (translated.size != slots.size) return Result.Unavailable
+        if (translated.size != slots.size) return null
 
         // Google's ordinary auto-detection understands many Latin-script
         // Hindi/Urdu/Punjabi lyrics, but its NMT occasionally returns whole
@@ -209,18 +228,10 @@ object LyricsTranslation {
             targetLanguage = target,
             texts = translated,
         )
+        currentCoroutineContext().ensureActive()
         memory.put(cacheKey, entry)
         writeCache(cacheKey, entry)
-
-        return if (sameLanguage(source, target)) {
-            Result.SameLanguage(source)
-        } else {
-            Result.Translated(
-                lines = rebuild(lines, slots, translated),
-                sourceLanguage = source,
-                fromCache = false,
-            )
-        }
+        return entry
     }
 
     suspend fun romanize(
@@ -250,13 +261,21 @@ object LyricsTranslation {
         }
 
         val target = targetLanguageTag.trim().ifBlank { "en" }
+        val answer = requests.run("romanize:$cacheKey") {
+            cachedText(cacheKey, slots.size)?.let { ResolvedText(it, true) }
+                ?: fetchRomanization(cacheKey, target, slots)?.let { ResolvedText(it, false) }
+        } ?: return RomanizationResult.Unavailable
+        return RomanizationResult.Romanized(rebuild(lines, slots, answer.entry.texts), answer.entry.sourceLanguage, answer.fromCache)
+    }
+
+    private suspend fun fetchRomanization(cacheKey: String, target: String, slots: List<TextSlot>): CachedTranslation? {
         val batches = batches(slots)
         val answers = coroutineScope {
             batches.chunked(MAX_PARALLEL_REQUESTS).flatMap { group ->
                 group.map { batch -> async { requestRomanizationBatch(batch, target) } }.awaitAll()
             }
         }
-        if (answers.any { it == null }) return RomanizationResult.Unavailable
+        if (answers.any { it == null }) return null
         val complete = answers.filterNotNull()
         val source = complete
             .groupBy { canonicalLanguage(it.sourceLanguage) }
@@ -264,12 +283,12 @@ object LyricsTranslation {
             ?.key
             .orEmpty()
         val romanized = complete.flatMap { it.translations }
-        if (source.isBlank() || romanized.size != slots.size) return RomanizationResult.Unavailable
+        if (source.isBlank() || romanized.size != slots.size) return null
         if (unchangedWeight(slots, romanized) == slots.sumOf { it.text.length }) {
             // Non-Latin input reached this point, so an unchanged response is
             // an unsupported/failed romanization rather than an already-Latin
             // lyric. The fast all-Latin check above handles the real no-op case.
-            return RomanizationResult.Unavailable
+            return null
         }
 
         val entry = CachedTranslation(
@@ -277,13 +296,10 @@ object LyricsTranslation {
             targetLanguage = "Latn",
             texts = romanized,
         )
+        currentCoroutineContext().ensureActive()
         memory.put(cacheKey, entry)
         writeCache(cacheKey, entry)
-        return RomanizationResult.Romanized(
-            lines = rebuild(lines, slots, romanized),
-            sourceLanguage = source,
-            fromCache = false,
-        )
+        return entry
     }
 
     private fun flatten(lines: List<LyricLine>): List<TextSlot> = buildList {

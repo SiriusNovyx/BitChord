@@ -3,6 +3,8 @@ package com.music.bitchord.desktop
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AutomixPerformanceMode
 import com.music.bitchord.data.settings.TrackAnalysisState
+import com.music.bitchord.data.settings.TrackAnalysisEligibility
+import com.music.bitchord.data.settings.TrackAnalysisStatus
 import com.music.bitchord.playback.smart.AnalysisStore
 import com.music.bitchord.playback.smart.BeatTracker
 import com.music.bitchord.playback.smart.MelSpectrogram
@@ -35,19 +37,19 @@ internal class DesktopTrackAnalyzer(
      */
     private val stopped: () -> Boolean = { false },
     private val onAnalysed: (String) -> Unit = {},
+    private val worker: ExecutorService = analysisWorker(),
+    private val sourceOverride: (suspend (Song) -> DesktopStream?)? = null,
+    private val currentTimeMs: () -> Long = System::currentTimeMillis,
 ) {
-    /** One analysis at a time, on a thread of this class's own making. */
-    private val worker: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
-        Thread(null, runnable, "BitChord-Analysis", ANALYSIS_STACK_BYTES).apply {
-            isDaemon = true
-        }
-    }
 
     /** Analyses kept between runs, so a track measured yesterday is not measured again today. */
     private val store = AnalysisStore { DesktopAnalysisRuntime.analysisHome() }
 
     private val results = ConcurrentHashMap<String, TrackAnalysis>()
     private val running = ConcurrentHashMap.newKeySet<String>()
+    private val active = ConcurrentHashMap.newKeySet<String>()
+    private val sourceResolved = ConcurrentHashMap.newKeySet<String>()
+    private val noSource = ConcurrentHashMap.newKeySet<String>()
 
     /** Tracks the analyser could not measure. */
     private val failed = ConcurrentHashMap.newKeySet<String>()
@@ -77,17 +79,33 @@ internal class DesktopTrackAnalyzer(
         results.containsKey(trackId) || restored(trackId) != null
 
     /** How far this track has got, for the player's Automix line. */
-    fun stateFor(trackId: String): TrackAnalysisState = when {
+    private fun stateFor(trackId: String): TrackAnalysisState = when {
         trackId.isBlank() -> TrackAnalysisState.WAITING
         !DesktopAnalysisRuntime.available -> TrackAnalysisState.FAILED
         // Usable first and a pass in flight second, the order Android settled on.
         results[trackId]?.isUsable == true ->
-            if (trackId in running) TrackAnalysisState.REFINING else TrackAnalysisState.ANALYSED
-        trackId in running -> TrackAnalysisState.ANALYSING
+            if (trackId in active) TrackAnalysisState.REFINING else TrackAnalysisState.ANALYSED
+        trackId in active -> TrackAnalysisState.ANALYSING
         // A recorded-but-unusable result is the analyser saying it tried and got nothing, and that
         // it will not try again.
         trackId in failed || results.containsKey(trackId) -> TrackAnalysisState.FAILED
         else -> TrackAnalysisState.WAITING
+    }
+
+    fun statusFor(song: Song?, stream: DesktopStream? = null): TrackAnalysisStatus {
+        if (song == null || song.videoId.isBlank()) return TrackAnalysisStatus()
+        val eligibility = when {
+            song.isVideoOrigin -> TrackAnalysisEligibility.VIDEO
+            song.isNativeSpotify -> TrackAnalysisEligibility.SOURCE_POLICY
+            stream?.isLocalFile != true && DesktopAddonSource.parseTrack(song.videoId) != null -> TrackAnalysisEligibility.SOURCE_POLICY
+            !DesktopAnalysisRuntime.available -> TrackAnalysisEligibility.ANALYSER_UNAVAILABLE
+            stream?.isLocalFile == true -> TrackAnalysisEligibility.ELIGIBLE
+            song.videoId in noSource -> TrackAnalysisEligibility.NO_SOURCE
+            DesktopSourceRegistry.hasYouTubeOriginal(song) || song.videoId in sourceResolved || results.containsKey(song.videoId) -> TrackAnalysisEligibility.ELIGIBLE
+            song.title.isBlank() -> TrackAnalysisEligibility.NO_SOURCE
+            else -> TrackAnalysisEligibility.UNKNOWN
+        }
+        return TrackAnalysisStatus(eligibility, stateFor(song.videoId))
     }
 
     /**
@@ -104,6 +122,10 @@ internal class DesktopTrackAnalyzer(
         if (trackId.isBlank()) return
         if (durationSeconds <= 0) return
         if (stopped()) return
+        val eligibility = statusFor(song, stream).eligibility
+        if (eligibility == TrackAnalysisEligibility.ABSENT || eligibility == TrackAnalysisEligibility.VIDEO ||
+            eligibility == TrackAnalysisEligibility.SOURCE_POLICY) return
+        if (song.title.isBlank() && eligibility == TrackAnalysisEligibility.NO_SOURCE && trackId !in noSource) return
         if (!DesktopAnalysisRuntime.available) {
             if (warnedNoAnalyser.compareAndSet(false, true)) {
                 DesktopTrackLog.log("automix: this build has no analyser, so nothing will be measured")
@@ -112,8 +134,9 @@ internal class DesktopTrackAnalyzer(
         }
         if (results.containsKey(trackId) || restored(trackId) != null) return
         // Asked every tick; a track that just failed is not resolved and decoded again each time.
-        failedAt[trackId]?.let { if (System.currentTimeMillis() - it < RETRY_AFTER_MS) return }
+        failedAt[trackId]?.let { if (currentTimeMs() - it < RETRY_AFTER_MS) return }
         if (!running.add(trackId)) return
+        noSource.remove(trackId)
         failed.remove(trackId)
         val local = stream?.takeIf { it.isLocalFile }
         DesktopTrackLog.log(
@@ -122,7 +145,8 @@ internal class DesktopTrackAnalyzer(
         )
 
         worker.execute {
-            run {
+            try {
+                active.add(trackId)
                 if (stopped()) {
                     running.remove(trackId)
                     return@execute
@@ -144,7 +168,7 @@ internal class DesktopTrackAnalyzer(
                 }
                 if (analysis == null) {
                     failed += trackId
-                    failedAt[trackId] = System.currentTimeMillis()
+                    failedAt[trackId] = currentTimeMs()
                 }
                 if (analysis != null) {
                     failedAt.remove(trackId)
@@ -157,6 +181,8 @@ internal class DesktopTrackAnalyzer(
                     )
                     onAnalysed(trackId)
                 }
+            } finally {
+                active.remove(trackId)
                 running.remove(trackId)
             }
         }
@@ -167,11 +193,19 @@ internal class DesktopTrackAnalyzer(
      * is no YouTube copy of it to measure.
      */
     private fun youTubeOpus(song: Song): DesktopStream? = runBlocking {
+        sourceOverride?.let { resolve ->
+            val source = resolve(song)
+            if (source == null) noSource.add(song.videoId) else sourceResolved.add(song.videoId)
+            return@runBlocking source
+        }
         val identity = DesktopSourceRegistry.youTubeIdentity(song)
         if (identity == null) {
+            noSource.add(song.videoId)
             DesktopTrackLog.log("automix: no YouTube copy of '${song.title}' to measure")
             return@runBlocking null
         }
+        noSource.remove(song.videoId)
+        sourceResolved.add(song.videoId)
         if (identity.videoId != song.videoId) {
             DesktopTrackLog.log("automix: measuring '${song.title}' on YouTube's ${identity.videoId}")
         }
@@ -265,11 +299,17 @@ internal class DesktopTrackAnalyzer(
         worker.shutdownNow()
         results.clear()
         running.clear()
+        active.clear()
+        sourceResolved.clear()
+        noSource.clear()
         failed.clear()
         failedAt.clear()
     }
 
     internal companion object {
+        private fun analysisWorker(): ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+            Thread(null, runnable, "BitChord-Analysis", ANALYSIS_STACK_BYTES).apply { isDaemon = true }
+        }
 
         /** How long a track that failed to be measured waits before it is tried again. */
         const val RETRY_AFTER_MS = 60_000L

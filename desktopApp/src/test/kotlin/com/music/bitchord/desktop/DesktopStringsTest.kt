@@ -5,9 +5,26 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 
 /** The string catalogue: what it holds, what it falls back to, and that it is really translated. */
 class DesktopStringsTest {
+
+    @Test fun `language observers see the new catalogue when the choice changes`() = kotlinx.coroutines.runBlocking {
+        val before = DesktopStrings.language.value
+        try {
+            DesktopStrings.setLanguage("en")
+            val translated = kotlinx.coroutines.CompletableDeferred<String>()
+            val observer = launch(kotlinx.coroutines.Dispatchers.Unconfined) {
+                DesktopStrings.language.collect { if (it == "th") translated.complete(DesktopStrings["settings"]) }
+            }
+            try {
+                DesktopStrings.setLanguage("th")
+                assertEquals("การตั้งค่า", translated.await())
+            } finally { observer.cancel() }
+        } finally { DesktopStrings.setLanguage(before) }
+    }
 
     @Test
     fun `every language offered has a catalogue behind it`() {

@@ -200,4 +200,10 @@
     <string name="search_library_empty">आपके लोकल म्यूज़िक फ़ोल्डर के गाने खोजें.</string>
     <string name="search_library_hint">गाने, कलाकार और एल्बम</string>
     <string name="search_library_no_results">लोकल म्यूज़िक में “%1$s” से मेल खाता कुछ नहीं.</string>
+    <string name="analysis_absent">कोई गाना नहीं</string>
+    <string name="analysis_source_pending">स्रोत की प्रतीक्षा</string>
+    <string name="analysis_unsupported_video">वीडियो समर्थित नहीं</string>
+    <string name="analysis_unsupported_source">स्रोत समर्थित नहीं</string>
+    <string name="analysis_no_source">विश्लेषण का स्रोत नहीं</string>
+    <string name="analysis_unavailable">विश्लेषक उपलब्ध नहीं</string>
 </resources>

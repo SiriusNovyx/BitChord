@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.player
 
+import com.music.bitchord.data.settings.LyricsDisplayMode
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
@@ -54,7 +56,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableLongState
 import androidx.compose.runtime.Stable
@@ -66,7 +67,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -135,9 +135,9 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.random.Random
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -166,8 +166,8 @@ private const val UNSUNG_ALPHA_STRIP = 0.55f
  * every line, which is a lamp being dragged along under the words: a shape that
  * belongs to the highlight rather than to the singing, present on patter and
  * held notes alike. It is now attached to the letters of the held words
- * themselves — see [LyricLine.growingWords][com.music.bitchord.data.lyrics.LyricLine.growingWords]
- * — so a line of quick syllables has no glow at all and a carried note lights
+ * themselves â€” see [LyricLine.growingWords][com.music.bitchord.data.lyrics.LyricLine.growingWords]
+ * â€” so a line of quick syllables has no glow at all and a carried note lights
  * up letter by letter, which is where the light was always meant to come from.
  */
 private const val GLOW_ALPHA = 0.62f
@@ -183,7 +183,7 @@ private val GLOW_RADIUS = 6.dp
  * Room reserved inside each copy of a line for the halo to spread into.
  *
  * A blur is computed on its layer's own bitmap, so a halo with nowhere to go
- * inside those bounds is a halo with a hard edge — which is what cropped the
+ * inside those bounds is a halo with a hard edge â€” which is what cropped the
  * bloom to the line's box. Every copy carries the same inset so they still lay
  * out identically, and the list gives the width back by taking it off its own
  * padding and row spacing.
@@ -194,7 +194,7 @@ private val GLOW_ROOM = 10.dp
  * How the answering vocal is drawn: smaller than the lead and a shade behind
  * it, the way Apple Music hangs a backing line under the one it answers.
  *
- * Small enough to be read as a second voice at a glance and no smaller —
+ * Small enough to be read as a second voice at a glance and no smaller â€”
  * these are the words of the song, not a caption.
  */
 private val BACKING_FONT_SIZE = 23.sp
@@ -228,7 +228,7 @@ private const val BACKING_REST_SCALE = 0.94f
 private const val BACKING_FADE_LEAD = 1.6f
 
 /**
- * The romanization or translation hung under each line — caption-sized, the
+ * The romanization or translation hung under each line â€” caption-sized, the
  * way Apple Music prints pronunciation under the lyric, and tucked up into the
  * lead's glow inset so the two read as one line rather than two rows.
  */
@@ -311,7 +311,7 @@ private val LINE_FALLOFF_BLUR = arrayOf(0.dp, 1.dp, 1.dp, 1.7.dp, 2.4.dp)
  * That wrapping is the whole point: at this size a line of a song is rarely one
  * row, so the rows that wrap run nearly the full column and only the last one
  * of each is short. A ladder of evenly spaced bars of assorted lengths is what
- * a loading list looks like — text is blocks with ragged bottoms.
+ * a loading list looks like â€” text is blocks with ragged bottoms.
  */
 private val SKELETON_BLOCKS = listOf(
     floatArrayOf(0.97f, 0.54f),
@@ -361,7 +361,7 @@ private const val SCROLL_LEAD_MAX_MS = 500L
 /**
  * The curve every handover runs on: away quickly, in slowly and softly.
  *
- * One curve for the lot — dimming, blurring, scaling and the scroll — so a
+ * One curve for the lot â€” dimming, blurring, scaling and the scroll â€” so a
  * line handing over reads as a single movement rather than four that happen to
  * start together.
  */
@@ -392,7 +392,7 @@ private class ScrollRun(val id: Int, val delta: Float, val durationMs: Int) {
 }
 
 /**
- * How long before a line lands the panel starts moving to it — and how long
+ * How long before a line lands the panel starts moving to it â€” and how long
  * the move then takes, which is the same number.
  *
  * It is the run-up: the silence between the last word of the line being sung
@@ -407,7 +407,7 @@ private fun scrollLead(lines: List<LyricLine>, positionMs: Long): Long {
     // below does not catch it: `current + 1` is 0, which is a perfectly real
     // line, so the elvis never fires and `lines[current]` indexes at -1.
     //
-    // Only reachable while the playhead is genuinely before the first lyric —
+    // Only reachable while the playhead is genuinely before the first lyric â€”
     // a track paused at 0:00 whose words start a few seconds in, which is
     // every track that opens on an intro.
     if (current < 0) return SCROLL_LEAD_MIN_MS
@@ -418,7 +418,7 @@ private fun scrollLead(lines: List<LyricLine>, positionMs: Long): Long {
 
 /**
  * How far a finger has to carry the lyric list before the player below it
- * gets out of the way — or comes back.
+ * gets out of the way â€” or comes back.
  *
  * Roughly a line of body text. Below that a scroll is a nudge to see one more
  * line rather than a decision to go reading, and answering every nudge put the
@@ -433,9 +433,8 @@ internal sealed interface LyricsTranslationUiState {
     data object Loading : LyricsTranslationUiState
     data class Ready(val lines: List<LyricLine>) : LyricsTranslationUiState
     data object SameLanguage : LyricsTranslationUiState
+    data object Unavailable : LyricsTranslationUiState
 }
-
-internal enum class LyricsDisplayMode { Original, Romanized, Translated }
 
 private const val TRANSLATION_MOTION_MS = 540
 private const val PARTICLES_PER_VOICE = 18
@@ -451,7 +450,7 @@ private data class TranslationParticle(
  * Source/status caption, with the provider chooser hung off the caption itself.
  *
  * The provider's name is the one line here that names something the reader can
- * act on — it is a choice, not a fact — so it is the line that opens the
+ * act on â€” it is a choice, not a fact â€” so it is the line that opens the
  * chooser, underlined the way the other actions are.
  *
  * The link is absent where it has nothing to open: a line that only says the
@@ -503,7 +502,7 @@ internal fun adjustedLyricsSeekTarget(lineTimeMs: Long, offsetMs: Int): Long =
     (lineTimeMs + offsetMs.toLong()).coerceAtLeast(0L)
 
 /**
- * The current lyric, one line, directly above the scrubber — or the line
+ * The current lyric, one line, directly above the scrubber â€” or the line
  * saying why there isn't one.
  */
 @Composable
@@ -553,7 +552,7 @@ internal fun CurrentLyricStrip(
 /**
  * What the lyrics read the playhead through: the player's latest reading,
  * shifted by the lyrics offset, together with when it was taken and whether the
- * player has jumped since — see [LyricClock] for why all three are needed.
+ * player has jumped since â€” see [LyricClock] for why all three are needed.
  *
  * Read only from the frame loop and from effects, never in composition. Read in
  * composition, every reading recomposed the whole lyric panel twice a second;
@@ -571,7 +570,7 @@ internal class LyricPlayhead(
 
     /**
      * Changes whenever the lyrics are meant to jump: the player seeking, or the
-     * reader moving the lyrics offset — which shifts every reading at once, and
+     * reader moving the lyrics offset â€” which shifts every reading at once, and
      * without saying so would look like a reading gone wrong.
      */
     val discontinuity: Long
@@ -592,7 +591,7 @@ private fun nanosToMs(nanos: Long): Double = nanos / 1_000_000.0
  * The player reports where it is about twice a second, which is fine for a
  * scrubber and far too coarse for a highlight that has to keep up with a
  * singer. This runs a clock on the frames in between and lets the readings
- * steer it — see [LyricClock] for why steering, rather than setting, is the
+ * steer it â€” see [LyricClock] for why steering, rather than setting, is the
  * difference between a sweep that glides and one that stutters or stalls.
  *
  * Returned as state rather than a plain value on purpose: read inside a draw
@@ -600,10 +599,11 @@ private fun nanosToMs(nanos: Long): Double = nanos / 1_000_000.0
  * whole line would recompose sixty times a second.
  */
 @Composable
-private fun rememberLyricClock(
+internal fun rememberLyricClock(
     trackKey: Any,
     playhead: LyricPlayhead,
     isPlaying: Boolean,
+    schedule: LyricFrameSchedule,
 ): MutableLongState {
     val clock = remember(trackKey) {
         mutableLongStateOf(Snapshot.withoutReadObservation { playhead.positionMs })
@@ -623,7 +623,7 @@ private fun rememberLyricClock(
     }
 
     // Gated on the app being on screen. The loop asks for a frame, writes a
-    // value that invalidates a drawing, and is handed the next frame for it —
+    // value that invalidates a drawing, and is handed the next frame for it â€”
     // which is a request to render continuously for as long as it runs. That is
     // the right trade for a lyric being read and the wrong one for a phone in a
     // pocket, and the composition alone cannot tell the two apart.
@@ -633,11 +633,35 @@ private fun rememberLyricClock(
     //
     // One loop for the whole run, reading the playhead itself. Keyed on the
     // reading instead, every reading restarted it, and each restart spent a
-    // frame waiting for its first frame time — a hitch twice a second.
+    // frame waiting for its first frame time â€” a hitch twice a second.
     val foreground = rememberIsForeground()
-    LaunchedEffect(engine, playhead, isPlaying, foreground) {
+    val frameDriven by remember(schedule, clock) {
+        derivedStateOf { schedule.needsFrames(clock.longValue) }
+    }
+    LaunchedEffect(engine, playhead, isPlaying, foreground, schedule, frameDriven) {
         if (!isPlaying || !foreground) return@LaunchedEffect
         engine.restart()
+        if (!frameDriven) {
+            fun updateClock() {
+                val sampledAt = playhead.sampledAtNanos
+                clock.longValue = engine.frame(
+                    nowMs = nanosToMs(System.nanoTime()),
+                    reportedMs = playhead.positionMs,
+                    sampledAtMs = if (sampledAt > 0L) nanosToMs(sampledAt) else Double.NaN,
+                    discontinuity = playhead.discontinuity,
+                )
+            }
+            snapshotFlow { Triple(playhead.positionMs, playhead.sampledAtNanos, playhead.discontinuity) }
+                .collectLatest {
+                    updateClock()
+                    while (true) {
+                        val boundary = schedule.nextBoundaryAfter(clock.longValue) ?: break
+                        delay((boundary - clock.longValue).coerceAtLeast(1L))
+                        updateClock()
+                    }
+                }
+            return@LaunchedEffect
+        }
         while (true) {
             withFrameNanos { frameNanos ->
                 // Readings are stamped on the System.nanoTime clock. The frame
@@ -669,7 +693,7 @@ private const val SAME_CLOCK_NANOS = 250_000_000L
  * Two copies of the same text stacked: a dim one and a bright one clipped to
  * whatever has been sung. Same string, same style, same constraints, so the
  * two lay out identically and the bright copy lands exactly on top of the dim
- * one. The alternative — colouring an AnnotatedString word by word — can only
+ * one. The alternative â€” colouring an AnnotatedString word by word â€” can only
  * change a whole word at a time, which turns the sweep into a flicker.
  *
  * The clip is recomputed in the draw phase, so a frame costs one clip and one
@@ -701,13 +725,13 @@ private fun SweptLyricLine(
     var layout by remember(line) { mutableStateOf<TextLayoutResult?>(null) }
 
     // Filled in and read back a letter at a time inside the draw lambdas, and
-    // shared by all three copies of the line — they draw one after another on
+    // shared by all three copies of the line â€” they draw one after another on
     // the same thread, so there is only ever one letter in hand. Held here
     // rather than allocated per frame: a held word is seven letters at the
     // outside, but this runs on every frame of every line that has one.
     val growth = remember { CharGrowth() }
 
-    // Where this line is in its own animation — not started, moving, or done —
+    // Where this line is in its own animation â€” not started, moving, or done â€”
     // which changes three times a line rather than sixty times a second. The
     // draw passes below read the clock only while it says moving; on either
     // side they draw a position that looks identical to any other there (see
@@ -715,7 +739,7 @@ private fun SweptLyricLine(
     //
     // Read in draw, every line on screen used to redraw on every frame of
     // playback, and each line away from the playing one sits under a blur
-    // that then had to be worked out again — most of the panel's frame, for a
+    // that then had to be worked out again â€” most of the panel's frame, for a
     // picture that had not changed. Paused, nothing moved, which is why the
     // panel was smooth paused and slow playing.
     val phase = remember(line, clock) {
@@ -741,7 +765,7 @@ private fun SweptLyricLine(
     // halo. Sits inside the blur and outside the draw lambdas, so text-layout
     // coordinates and draw coordinates still agree.
     //
-    // Off unless asked for. Only the full panel can afford it — it takes the
+    // Off unless asked for. Only the full panel can afford it â€” it takes the
     // space back off its own row spacing and content padding. Handed to the
     // one-line strip above the scrubber, where there is no glow to make room
     // for and nothing paying the space back, it just left the line sitting in
@@ -749,7 +773,7 @@ private fun SweptLyricLine(
     val room = if (glowRoom > 0.dp) Modifier.padding(glowRoom) else Modifier
 
     // Sits outside [room] and outside the sweep, so what it moves is the
-    // finished picture of the word — dim tail, lit head and all — rather than
+    // finished picture of the word â€” dim tail, lit head and all â€” rather than
     // one copy sliding out from under another. Carried by both copies from the
     // same arithmetic, which is what keeps them on top of each other.
     //
@@ -786,8 +810,8 @@ private fun SweptLyricLine(
         val position = drawnAt()
         when {
             // Sung and done with: all of it is lit. Checked first so the lines
-            // above and below the playing one — which are in this same state
-            // for minutes at a time — cost a comparison per frame rather than
+            // above and below the playing one â€” which are in this same state
+            // for minutes at a time â€” cost a comparison per frame rather than
             // a walk of their words.
             position >= line.endMs -> drawContent()
             // Not started: nothing lit, the dim copy is the whole of it.
@@ -828,7 +852,7 @@ private fun SweptLyricLine(
                     .blur(glowRadius, BlurredEdgeTreatment.Unbounded)
                     .then(room)
                     // Each letter is masked to its own brightness with DstIn,
-                    // which needs a layer of its own to erase into — against the
+                    // which needs a layer of its own to erase into â€” against the
                     // backdrop it would take the artwork with it.
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithContent {
@@ -855,7 +879,7 @@ private fun SweptLyricLine(
             color = Color.White,
             maxLines = maxLines,
             overflow = overflow,
-            // The feather erases into this layer, so the layer has to exist —
+            // The feather erases into this layer, so the layer has to exist â€”
             // and only while it is being drawn. Every line carrying one would
             // put the whole panel through an offscreen buffer to soften an edge
             // that at most two of them have.
@@ -877,7 +901,7 @@ private fun SweptLyricLine(
 
 /**
  * Draws this text clipped to the letters of the words being held, each at its
- * own brightness — the light the singing is actually giving off, rather than a
+ * own brightness â€” the light the singing is actually giving off, rather than a
  * band of it dragged along behind the highlight.
  *
  * Nothing at all on a line of ordinary syllables: the words that light up are
@@ -887,7 +911,7 @@ private fun SweptLyricLine(
  * arrives only when a note is carried is a property of the voice.
  *
  * Each letter is masked to its own bloom rather than drawn at it, because the
- * caller's layer is what this erases into — see [SweptLyricLine]. The mask
+ * caller's layer is what this erases into â€” see [SweptLyricLine]. The mask
  * lands before the blur, so what spreads is already the right brightness.
  */
 private fun ContentDrawScope.glowGrown(
@@ -934,8 +958,8 @@ private fun ContentDrawScope.glowGrown(
                     }
                 }
                 // Scoped to this letter's own clip, so it takes this letter's
-                // brightness down and leaves its neighbours — which have their
-                // own, a beat behind — where they are.
+                // brightness down and leaves its neighbours â€” which have their
+                // own, a beat behind â€” where they are.
                 drawRect(
                     color = Color.White.copy(alpha = growth.bloom),
                     blendMode = BlendMode.DstIn,
@@ -952,8 +976,8 @@ private fun ContentDrawScope.glowGrown(
  * The line is cut at word boundaries and each piece replayed at its own
  * height, which is what CSS gets for free by making every syllable its own
  * box. Cutting between words rather than inside one means no glyph is ever
- * sliced, and the pieces that are on the floor — which is most of them, most
- * of the time — are one replay between them rather than one each.
+ * sliced, and the pieces that are on the floor â€” which is most of them, most
+ * of the time â€” are one replay between them rather than one each.
  *
  * Costs nothing at all until something is off the floor: a line with no lift
  * on it draws exactly once, the same as it did before any of this.
@@ -990,8 +1014,8 @@ private fun ContentDrawScope.riseWith(
             if (start >= end) continue
             // Only while it is actually moving. Once the last letter has come to
             // rest the word is back to being an ordinary sung word settling
-            // down, and the two agree exactly at the handover — a letter rests
-            // at precisely the lift [LyricLine.wordLift] would give it — so the
+            // down, and the two agree exactly at the handover â€” a letter rests
+            // at precisely the lift [LyricLine.wordLift] would give it â€” so the
             // cheaper single slice takes over without a step.
             val held = line.growingAt(index)?.takeIf { positionMs in it.startMs..it.restsAtMs }
             val lift = line.wordLift(index, positionMs)
@@ -1034,8 +1058,8 @@ private fun ContentDrawScope.riseWith(
  * it sits: a glyph grown about its middle reaches past the box it was laid out
  * in, and clipping to that box would shave both sides off it as it swells.
  *
- * The overlap that buys — a letter's clip reaching a pixel or so into its
- * neighbour's — is why this is only ever run on a word that has earned it. Two
+ * The overlap that buys â€” a letter's clip reaching a pixel or so into its
+ * neighbour's â€” is why this is only ever run on a word that has earned it. Two
  * copies of a glyph edge a pixel apart is nothing on a letter mid-swell and
  * would be an obvious double image across a whole line.
  */
@@ -1092,7 +1116,7 @@ private fun ContentDrawScope.growEach(
  * Where an offset sits horizontally *on the row it was cut out of*.
  *
  * [TextLayoutResult.getHorizontalPosition] answers for the row the offset
- * itself belongs to — and the offset one past the last character of a wrapped
+ * itself belongs to â€” and the offset one past the last character of a wrapped
  * row belongs to the next row, so asking where a word that runs up to a wrap
  * *ends* gives a position at the far left, one row down. A slice cut between
  * there and the word's start is empty, and the walk then treats the row as
@@ -1133,7 +1157,7 @@ private fun ContentDrawScope.sliceRisen(
 /**
  * Where a fractional character index sits across a visual line, in pixels.
  *
- * Inside a timed piece — a syllable, or a word nobody split — that sits whole
+ * Inside a timed piece â€” a syllable, or a word nobody split â€” that sits whole
  * on this row, the index is read as a share of the piece and laid across its
  * width. Read letter by letter instead, the edge crossed a "w" in the same time
  * as an "i": it sped up and slowed down inside every word, a wobble that a held
@@ -1159,7 +1183,7 @@ private fun horizontalAt(
     val index = chars.toInt().coerceIn(lineStart, lineEnd)
     // Row-aware at both ends: on the last character of a wrapped row the next
     // position belongs to the row below, and read straight it puts the edge
-    // back at the left margin — the highlight jumped backwards a letter before
+    // back at the left margin â€” the highlight jumped backwards a letter before
     // every wrap.
     val here = layout.xOn(index, visualLine, 0f)
     val next = layout.xOn((index + 1).coerceAtMost(lineEnd), visualLine, 0f)
@@ -1172,13 +1196,13 @@ private fun horizontalAt(
  * Wrapped lines are handled a visual line at a time: the ones already passed
  * are drawn whole, the one holding the boundary is cut at it, and the rest are
  * left to the dim copy. Within a word the cut moves across the word's width
- * at a steady rate — see [horizontalAt] — rather than jumping a letter at a
+ * at a steady rate â€” see [horizontalAt] â€” rather than jumping a letter at a
  * time. [spans] are the line's timed pieces, [LyricLine.sweepSpans]; empty, the
  * cut goes letter by letter.
  *
  * The boundary itself is then feathered over [WIPE_FEATHER] rather than left
  * as the cut, which needs the caller to give this an offscreen layer to erase
- * into — see [SweptLyricLine]. Only the line actually being sung carries one;
+ * into â€” see [SweptLyricLine]. Only the line actually being sung carries one;
  * everywhere else the boundary is at one end of the text or the other and
  * there is nothing to soften.
  */
@@ -1221,7 +1245,7 @@ private fun ContentDrawScope.sweepTo(
         // Scoped to this line's band so the mask cannot reach the lines above
         // and below it: DstIn erases whatever the source does not cover, and
         // outside the clip there is no source at all, so they are left alone.
-        // Within it the brush clamps — opaque behind the feather, gone past it.
+        // Within it the brush clamps â€” opaque behind the feather, gone past it.
         clipRect(top = top, bottom = bottom) {
             drawRect(
                 brush = Brush.horizontalGradient(
@@ -1238,7 +1262,7 @@ private fun ContentDrawScope.sweepTo(
 }
 
 /**
- * The translate control, sized and lit like every other disc in the player —
+ * The translate control, sized and lit like every other disc in the player â€”
  * see [CircleGlyph]. Its own composable rather than a [CircleGlyph] call
  * because it has a fourth state the others do not: a request in flight, which
  * takes the icon's place rather than sitting beside it.
@@ -1266,7 +1290,7 @@ internal fun TranslationToggleButton(
             .clip(CircleShape)
             .background(Color.White.copy(alpha = discAlpha))
             .clickable(
-                enabled = enabled,
+                enabled = enabled || showingTranslation,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
@@ -1317,7 +1341,7 @@ internal fun RomanizationToggleButton(
             .clip(CircleShape)
             .background(Color.White.copy(alpha = discAlpha))
             .clickable(
-                enabled = enabled,
+                enabled = enabled || showingRomanization,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
@@ -1577,7 +1601,12 @@ internal fun LyricsPanel(
     modifier: Modifier = Modifier,
 ) {
     val panelPlaying = isPlaying && active
-    val clock = rememberLyricClock(trackKey, playhead, panelPlaying)
+    val schedule = remember(lines) {
+        LyricFrameSchedule(lines, animateGaps = true,
+            scrollLeadMinMs = SCROLL_LEAD_MIN_MS, scrollLeadMaxMs = SCROLL_LEAD_MAX_MS,
+            backgroundLeadMs = BACKING_LEAD_MS)
+    }
+    val clock = rememberLyricClock(trackKey, playhead, panelPlaying, schedule)
     val subReveal = rememberSubLyricsReveal(subLines, trackKey)
 
     val isSynced = remember(lines) { lines.any { it.timeMs > 0L } }
@@ -1595,7 +1624,7 @@ internal fun LyricsPanel(
     // even as later rows begin their own independent highlight animations.
     val scrollLine = activeRows.firstOrNull() ?: -1
     // Where the panel is heading, which is a beat ahead of where the singing
-    // is. Movement that starts on the downbeat arrives after it — the line is
+    // is. Movement that starts on the downbeat arrives after it â€” the line is
     // already being sung by the time it settles, and you read it late. Started
     // during the run-up instead, the words are under your eye when they land.
     //
@@ -1626,7 +1655,7 @@ internal fun LyricsPanel(
     }
     val keepScroll = remember(listState) { keepScrollInList(listState) }
     var browsingByDrag by remember { mutableStateOf(false) }
-    // While picking lines, the panel must not auto-scroll — the reader needs
+    // While picking lines, the panel must not auto-scroll â€” the reader needs
     // the list to stay put so they can tap the lines they want.
     val browsing = browsingByDrag || picking
     val onBottomHalfTap: () -> Unit = {
@@ -1649,8 +1678,8 @@ internal fun LyricsPanel(
         listState.interactionSource.interactions.collect { interaction ->
             if (interaction is DragInteraction.Start) {
                 // Suspends the panel's own following, and nothing more. Which
-                // way the drag is going is what decides the controls now — see
-                // [controlsOnScroll] — and hiding here as well meant a
+                // way the drag is going is what decides the controls now â€” see
+                // [controlsOnScroll] â€” and hiding here as well meant a
                 // scroll *up*, the gesture that is supposed to bring them back,
                 // put them away first and then returned them.
                 browsingByDrag = true
@@ -1663,7 +1692,7 @@ internal fun LyricsPanel(
     // The direction is taken from the drag itself rather than from where the
     // list ends up, so it answers on the gesture rather than after it. Deltas
     // arrive a couple of pixels at a time, so they are accumulated and the
-    // total is what crosses [CONTROLS_SCROLL_SLOP] — and the total resets the
+    // total is what crosses [CONTROLS_SCROLL_SLOP] â€” and the total resets the
     // moment the finger changes its mind, so a scroll that wanders does not
     // bank its way to the wrong answer.
     //
@@ -1716,7 +1745,7 @@ internal fun LyricsPanel(
     // here would snap the panel back to the top mid-read.
     var placed by remember(trackKey) { mutableStateOf(false) }
     // Nothing resets [browsing] off [controlsOpen] any more. It used to, so
-    // that tapping the controls back resumed following — but the controls now
+    // that tapping the controls back resumed following â€” but the controls now
     // also come back by scrolling up, and clearing the flag there handed the
     // panel straight back to the song mid-gesture, scrolling the reader away
     // from the line they had gone looking for. The two timers below end a
@@ -1751,7 +1780,7 @@ internal fun LyricsPanel(
                         animationSpec = tween(durationMillis = span, easing = LYRIC_EASING),
                     )
                 }
-                // Somewhere off screen — after a seek, or a long instrumental
+                // Somewhere off screen â€” after a seek, or a long instrumental
                 // scrolled past. How far is not known without laying the rows
                 // out, so this hands back to the list's own staged scroll.
                 else -> listState.animateScrollToItem(focusLine, scrollOffset = 0)
@@ -1784,13 +1813,13 @@ internal fun LyricsPanel(
             .nestedScroll(controlsOnScroll)
             .nestedScroll(keepScroll)
             // Browsing leaves taps to each lyric row's seek action throughout
-            // the list — and picking leaves them nothing at all: the gesture
+            // the list â€” and picking leaves them nothing at all: the gesture
             // below takes taps at the initial pass, so while a pick is open it
             // would swallow every choice before the row ever saw it.
             .revealLyricsControlsOnTap(!controlsOpen && !picking, onBottomHalfTap)
             .fadingEdges(),
         // Each row carries GLOW_ROOM of its own inset for the halo, so the
-        // list hands that much back — otherwise the lines would sit a glow's
+        // list hands that much back â€” otherwise the lines would sit a glow's
         // width further apart and further in than they used to.
         contentPadding = PaddingValues(
             top = 40.dp - GLOW_ROOM,
@@ -1836,7 +1865,7 @@ internal fun LyricsPanel(
 
             // Off the line being sung, not off the line the panel is heading
             // for. Brightness is what says "these are the words right now", so
-            // it cannot run ahead of them — on a source with no word timings
+            // it cannot run ahead of them â€” on a source with no word timings
             // there is no sweep behind it to keep the sung line lit, and it
             // read as dim while it was still being sung.
             val offset = if (scrollLine < 0) 0 else index - scrollLine
@@ -1875,7 +1904,7 @@ internal fun LyricsPanel(
                 val until = lines.getOrNull(index + 1)?.timeMs ?: line.endMs
                 // How far through the break the song is, held at 0 before it and
                 // 1 after: the dots read the clock only while it is running, so
-                // a break that is not playing never redraws — see SweptLyricLine.
+                // a break that is not playing never redraws â€” see SweptLyricLine.
                 val gapFill = remember(line, until, clock) {
                     derivedStateOf(structuralEqualityPolicy()) {
                         val now = clock.longValue
@@ -1887,7 +1916,7 @@ internal fun LyricsPanel(
                     }
                 }
                 // The row itself opens and closes with the break, so the list
-                // carries no dead space through the verses either side of it —
+                // carries no dead space through the verses either side of it â€”
                 // which is also what stops the panel scrolling past a hole to
                 // reach the next line that is actually sung.
                 val swell by animateFloatAsState(
@@ -1909,7 +1938,7 @@ internal fun LyricsPanel(
                     modifier = Modifier
                         .blur(blur, BlurredEdgeTreatment.Unbounded)
                         .clip(RoundedCornerShape(10.dp))
-                        // A gap is nothing to pick, so it only ever seeks — and
+                        // A gap is nothing to pick, so it only ever seeks â€” and
                         // not even that while a pick is open, where a stray tap
                         // in the silence would jump the song.
                         .clickable(enabled = isSynced && !picking) { onSeekToLine(line.timeMs) }
@@ -1971,7 +2000,7 @@ internal fun LyricsPanel(
                 }
                 // The stack sits fractionally back and the playing line comes
                 // forward to meet you, rather than the playing line swelling
-                // past the others — a smaller move, and one that doesn't push
+                // past the others â€” a smaller move, and one that doesn't push
                 // the type around the line it hands over to.
                 //
                 // Anchored to the left edge, so the words don't slide sideways
@@ -1979,7 +2008,7 @@ internal fun LyricsPanel(
                 // sweep. A row under a finger dips, the way a button does.
                 // Behind the panel's focus, so the words close up to full
                 // brightness as it leaves rather than when the last syllable
-                // lands — the dim, the blur and the movement together.
+                // lands â€” the dim, the blur and the movement together.
                 val sung = offset < 0
                 // Rows behind the one being scrolled to are the ones that
                 // fan out; the ones it is moving away from arrive together.
@@ -2068,8 +2097,8 @@ internal fun LyricsPanel(
                     // of words gives no sign that pressing one does anything
                     // beyond seeking, so the gesture has to be discoverable
                     // from the header's link as well. Enabled only when there
-                    // is something to do — seek when the source stamps its
-                    // lines, choose while picking — so an unsynced row still
+                    // is something to do â€” seek when the source stamps its
+                    // lines, choose while picking â€” so an unsynced row still
                     // passes taps through to the panel behind it.
                     .then(
                         if (canPick) {
@@ -2089,7 +2118,7 @@ internal fun LyricsPanel(
                         } else {
                             // Where a card cannot be made there is nothing to
                             // pick, and a long press that did nothing would be
-                            // the only sign of it — so the row keeps the plain
+                            // the only sign of it â€” so the row keeps the plain
                             // tap it has always had.
                             Modifier.clickable(
                                 enabled = isSynced,
@@ -2110,7 +2139,7 @@ internal fun LyricsPanel(
                 // The answering voice is only on screen while it is being sung,
                 // the way Apple Music keeps it: it opens on its own clock, just
                 // ahead of its first word, and folds away once its last one is
-                // done — not with the lead, which it routinely enters halfway
+                // done â€” not with the lead, which it routinely enters halfway
                 // through and outlasts. Left open on every row, a verse of
                 // echoes read as two lyrics interleaved.
                 //
@@ -2263,7 +2292,7 @@ internal fun LyricsPanel(
 }
 
 /**
- * One voice of a row in [LyricsPanel] — the lead, or the answering line drawn
+ * One voice of a row in [LyricsPanel] â€” the lead, or the answering line drawn
  * under it.
  *
  * Both go through the same sweep. A backing vocal carries its own word
@@ -2289,15 +2318,16 @@ private fun PanelVoice(
     translationProgress: State<Float>? = null,
     /**
      * Whether words lift off the line as they are sung. Only the lead does:
-     * on the small lines under it — the answering voice, a translation — the
+     * on the small lines under it â€” the answering voice, a translation â€” the
      * movement competes with the line being read and makes the row look busy.
      */
     rise: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
+    val voiceStyle = com.music.bitchord.ui.thaiTextStyle(line.text, style)
     if (line.isWordSynced && !browsing) {
         // Every word-synced line goes through the sweep, not just the playing
-        // one — a line that has already been sung is fully revealed and one
+        // one â€” a line that has already been sung is fully revealed and one
         // still to come is not, which falls out of the same arithmetic.
         //
         // Running it only on the active line meant swapping this composable
@@ -2312,7 +2342,7 @@ private fun PanelVoice(
         SweptLyricLine(
             line = line,
             clock = clock,
-            style = style,
+            style = voiceStyle,
             dimAlpha = tail,
             modifier = modifier,
             glowAlpha = glowAlpha,
@@ -2324,7 +2354,7 @@ private fun PanelVoice(
         )
     } else if (line.isWordSynced) {
         // Browsing: keep the sweep so sung lines stay fully lit and unsung
-        // ones stay dim, but skip the bloom — it is a playback flourish, not
+        // ones stay dim, but skip the bloom â€” it is a playback flourish, not
         // a browsing aid.  Non-active lines get the same dim tail as when we
         // are not browsing; the active line stays at full brightness.
         val tail by animateFloatAsState(
@@ -2334,7 +2364,7 @@ private fun PanelVoice(
         SweptLyricLine(
             line = line,
             clock = clock,
-            style = style,
+            style = voiceStyle,
             dimAlpha = tail,
             modifier = modifier,
             glowAlpha = 0f,
@@ -2350,7 +2380,7 @@ private fun PanelVoice(
         // It still has to hold itself back until then. The parent's falloff
         // alone left a line not yet sung reading brighter here than the same
         // line does on a word-synced source, where the unsung words sit at
-        // [UNSUNG_ALPHA] underneath it — the two have to agree about what "not
+        // [UNSUNG_ALPHA] underneath it â€” the two have to agree about what "not
         // yet" looks like, or changing provider changes the panel rather than
         // the words. Lyrics with no timing at all are all "now", and stay lit.
         val lit by animateFloatAsState(
@@ -2360,7 +2390,7 @@ private fun PanelVoice(
         var layout by remember(line.text) { mutableStateOf<TextLayoutResult?>(null) }
         Text(
             text = line.text,
-            style = style,
+            style = voiceStyle,
             color = Color.White.copy(alpha = lit),
             onTextLayout = { layout = it },
             modifier = modifier.lyricParticles(layout, translationProgress, room).padding(room),
@@ -2436,7 +2466,7 @@ private fun Modifier.revealBelow(progress: State<Float>): Modifier = this
  *
  * The room it takes opens with it, so the rows below make way rather than
  * jump; the words fade in a little ahead of the room being made, and rise the
- * last few pixels into place from a hair smaller — the same small arrival
+ * last few pixels into place from a hair smaller â€” the same small arrival
  * am-lyrics gives its backing line. Scaled from the edge the line is written
  * from, so a right-hand duet line grows out of its own margin.
  *
@@ -2465,14 +2495,14 @@ private fun String.differsFrom(original: String): Boolean =
 
 /**
  * The answering vocal without the parentheses every text-only source wraps it
- * in — see [withBackgroundVocals]. Apple Music draws its own equivalent line
+ * in â€” see [withBackgroundVocals]. Apple Music draws its own equivalent line
  * bare, and the brackets were only ever there to mark the split before there
  * was a row of its own to draw it on.
  *
  * The LRC writer still gets the line with its brackets: that punctuation is
  * what the provider published, so a downloaded file keeps it. This is a
  * display-only trim, done here rather than in the data layer, and applied to
- * the words too, not just [LyricLine.text] — [SweptLyricLine] measures the
+ * the words too, not just [LyricLine.text] â€” [SweptLyricLine] measures the
  * words against the text it draws, and a sweep reading "(echoed" against a
  * line reading "echoed" would search for a substring that is no longer there.
  */
@@ -2534,7 +2564,8 @@ private fun CurrentLyricLine(
         return
     }
 
-    val clock = rememberLyricClock(trackKey, playhead, isPlaying)
+    val schedule = remember(lines) { LyricFrameSchedule(lines, animateGaps = false) }
+    val clock = rememberLyricClock(trackKey, playhead, isPlaying, schedule)
 
     val index by remember(lines) {
         derivedStateOf { lines.indexOfLast { it.timeMs <= clock.longValue } }
@@ -2542,7 +2573,7 @@ private fun CurrentLyricLine(
     val current = lines.getOrNull(index)
     // Before the first line, and through instrumental breaks, show the note.
     val instrumental = current == null || current.isGap
-    // Everything ahead of the first sung line is the intro — LRC files open on a
+    // Everything ahead of the first sung line is the intro â€” LRC files open on a
     // bare [00:00.00] gap, so that stretch is gap lines rather than nothing.
     val firstSung = remember(lines) { lines.indexOfFirst { !it.isGap } }
     val intro = instrumental && firstSung >= 0 && index < firstSung
@@ -2553,7 +2584,7 @@ private fun CurrentLyricLine(
     // the playback clock recomposed the strip. Pick it once for this track.
     val introLine = remember(trackKey) { introLines.random() }
     // The strip is one line and switches the moment the next one is due, so
-    // the answering vocal — where there is one — has nowhere to go: showing
+    // the answering vocal â€” where there is one â€” has nowhere to go: showing
     // it would mean either cutting it short when the next line arrives or
     // holding the strip back and leaving a gap before the next line's own
     // words appear. [LyricsPanel] has the room to draw it properly; here it
@@ -2610,7 +2641,7 @@ private fun CurrentLyricLine(
                 SweptLyricLine(
                     line = swept,
                     clock = clock,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = com.music.bitchord.ui.thaiTextStyle(lineText, MaterialTheme.typography.titleMedium),
                     dimAlpha = UNSUNG_ALPHA_STRIP,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -2619,7 +2650,7 @@ private fun CurrentLyricLine(
             } else {
                 Text(
                     text = lineText,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = com.music.bitchord.ui.thaiTextStyle(lineText, MaterialTheme.typography.titleMedium),
                     color = if (itemInstrumental) Color.White.copy(alpha = 0.5f) else Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -2638,7 +2669,7 @@ private fun CurrentLyricLine(
 }
 
 /**
- * Stands in for [CurrentLyricLine] once a lookup has come back empty — shown
+ * Stands in for [CurrentLyricLine] once a lookup has come back empty â€” shown
  * for a few seconds so it registers, then left to fade rather than snapping
  * out or lingering for the rest of the track.
  */
@@ -2681,7 +2712,7 @@ private fun LyricsLoadingLine(text: String, modifier: Modifier = Modifier) {
 
 /**
  * Everything the player shows about a lyric translation or romanization, and
- * the two toggles that ask for one — see [rememberLyricsTranslation].
+ * the two toggles that ask for one â€” see [rememberLyricsTranslation].
  */
 internal class LyricsTranslationUi(
     /** The lines the one-line strip reads: the originals, or their translation. */
@@ -2692,7 +2723,7 @@ internal class LyricsTranslationUi(
     val romanizationState: LyricsTranslationUiState,
     val showingTranslation: Boolean,
     val showingRomanization: Boolean,
-    /** Bumped on every switch between versions — the particle motion's trigger. */
+    /** Bumped on every switch between versions â€” the particle motion's trigger. */
     val transition: Int,
     val reduceMotion: Boolean,
     /** The line naming the lyrics' source, or what the translation is doing. */
@@ -2720,7 +2751,7 @@ internal fun rememberLyricsTranslation(
     val configuredLocale = appLanguageTag()
     val preferredTranslation by PlayerSettings.translationLanguage.collectAsStateWithLifecycle()
     // Settings wins where it has been set; blank means follow the app. Only the
-    // app-language path is reduced to a base language — a code chosen in
+    // app-language path is reduced to a base language â€” a code chosen in
     // Settings is already exactly what the endpoint wants and narrowing it
     // would throw away the script half of zh-TW. Chinese is the exception on the
     // app path too: bare "zh" comes back Simplified, so the script maps to zh-TW / zh-CN.
@@ -2736,176 +2767,57 @@ internal fun rememberLyricsTranslation(
     val translationLanguageName = remember(configuredLocale, translationLanguage) {
         translationLanguageName(translationLanguage, Locale.forLanguageTag(configuredLocale))
     }
-    // Resolved here, in composition, for the callbacks below to show.
-    val alreadyInLanguageMessage = stringResource(Res.string.lyrics_already_in_language, translationLanguageName)
-    val translationUnavailableMessage = stringResource(Res.string.lyrics_translation_unavailable)
-    val alreadyRomanizedMessage = stringResource(Res.string.lyrics_already_romanized)
-    val romanizationUnavailableMessage = stringResource(Res.string.lyrics_romanization_unavailable)
-    var translationState by remember(trackId, translationLanguage, lyrics) {
-        mutableStateOf<LyricsTranslationUiState>(LyricsTranslationUiState.Idle)
-    }
-    var romanizationState by remember(trackId, translationLanguage, lyrics) {
-        mutableStateOf<LyricsTranslationUiState>(LyricsTranslationUiState.Idle)
-    }
-    var lyricsDisplayMode by remember(trackId, translationLanguage, lyrics) {
-        mutableStateOf(LyricsDisplayMode.Original)
-    }
+    val lyricsDisplayMode by PlayerSettings.lyricsDisplayMode.collectAsStateWithLifecycle()
+    val host = PlayerPlatform.host
+    val operation = rememberLyricsTranslationState(
+        trackId, lyrics, translationLanguage, lyricsDisplayMode,
+        translate = host::translateLyrics,
+        romanize = host::romanizeLyrics,
+    )
+    val translationState = operation.translation
+    val romanizationState = operation.romanization
+    val translationTransition = operation.transition
     val showingTranslation = lyricsDisplayMode == LyricsDisplayMode.Translated
     val showingRomanization = lyricsDisplayMode == LyricsDisplayMode.Romanized
-    var translationTransition by remember(trackId) { mutableIntStateOf(0) }
-    var translationJob by remember(trackId, translationLanguage, lyrics) {
-        mutableStateOf<Job?>(null)
-    }
-    var romanizationJob by remember(trackId, translationLanguage, lyrics) {
-        mutableStateOf<Job?>(null)
-    }
-    DisposableEffect(trackId, translationLanguage, lyrics) {
-        onDispose {
-            translationJob?.cancel()
-            romanizationJob?.cancel()
-        }
-    }
     val displayedLyrics = when (lyricsDisplayMode) {
-        LyricsDisplayMode.Translated ->
-            (translationState as? LyricsTranslationUiState.Ready)?.lines ?: lyrics.orEmpty()
-        LyricsDisplayMode.Romanized ->
-            (romanizationState as? LyricsTranslationUiState.Ready)?.lines ?: lyrics.orEmpty()
+        LyricsDisplayMode.Translated -> (translationState as? LyricsTranslationUiState.Ready)?.lines ?: lyrics.orEmpty()
+        LyricsDisplayMode.Romanized -> (romanizationState as? LyricsTranslationUiState.Ready)?.lines ?: lyrics.orEmpty()
         LyricsDisplayMode.Original -> lyrics.orEmpty()
     }
-    // What the panel draws in small type under each original line, Apple
-    // Music style. The panel itself always keeps the original words; only the
-    // one-line strip over the scrubber swaps to [displayedLyrics]. One mode at
-    // a time by construction — [lyricsDisplayMode] holds a single value.
     val lyricsSubLines = when (lyricsDisplayMode) {
         LyricsDisplayMode.Translated -> (translationState as? LyricsTranslationUiState.Ready)?.lines
         LyricsDisplayMode.Romanized -> (romanizationState as? LyricsTranslationUiState.Ready)?.lines
         LyricsDisplayMode.Original -> null
     }
-    val translationScope = rememberCoroutineScope()
-    val toggleTranslation: () -> Unit = toggleTranslation@{
-        when (val state = translationState) {
-            is LyricsTranslationUiState.Ready -> {
-                lyricsDisplayMode = if (showingTranslation) {
-                    LyricsDisplayMode.Original
-                } else {
-                    LyricsDisplayMode.Translated
-                }
-                translationTransition++
-                haptics.play(Haptic.Select)
-            }
-            LyricsTranslationUiState.Loading -> Unit
-            LyricsTranslationUiState.SameLanguage -> {
-                haptics.play(Haptic.Tap)
-                PlayerPlatform.host.showMessage(alreadyInLanguageMessage)
-            }
-            LyricsTranslationUiState.Idle -> {
-                val source = lyrics.orEmpty()
-                if (source.isEmpty()) return@toggleTranslation
-                haptics.play(Haptic.Tap)
-                translationState = LyricsTranslationUiState.Loading
-                romanizationJob?.cancel()
-                if (romanizationState is LyricsTranslationUiState.Loading) {
-                    romanizationState = LyricsTranslationUiState.Idle
-                }
-                translationJob?.cancel()
-                translationJob = translationScope.launch {
-                    when (
-                        val result = PlayerPlatform.host.translateLyrics(
-                            trackId = trackId,
-                            lines = source,
-                            targetLanguageTag = translationLanguage,
-                        )
-                    ) {
-                        is LyricsTranslationResult.Translated -> {
-                            translationState = LyricsTranslationUiState.Ready(result.lines)
-                            lyricsDisplayMode = LyricsDisplayMode.Translated
-                            translationTransition++
-                            haptics.play(Haptic.ToggleOn)
-                        }
-                        is LyricsTranslationResult.SameLanguage -> {
-                            translationState = LyricsTranslationUiState.SameLanguage
-                            PlayerPlatform.host.showMessage(alreadyInLanguageMessage)
-                        }
-                        LyricsTranslationResult.Unavailable -> {
-                            translationState = LyricsTranslationUiState.Idle
-                            PlayerPlatform.host.showMessage(translationUnavailableMessage)
-                        }
-                    }
-                }
-            }
-        }
+    fun select(mode: LyricsDisplayMode) {
+        val next = if (lyricsDisplayMode == mode) LyricsDisplayMode.Original else mode
+        PlayerSettings.setLyricsDisplayMode(next)
+        haptics.play(if (next == LyricsDisplayMode.Original) Haptic.ToggleOff else Haptic.ToggleOn)
     }
-    val toggleRomanization: () -> Unit = toggleRomanization@{
-        when (val state = romanizationState) {
-            is LyricsTranslationUiState.Ready -> {
-                lyricsDisplayMode = if (showingRomanization) {
-                    LyricsDisplayMode.Original
-                } else {
-                    LyricsDisplayMode.Romanized
-                }
-                translationTransition++
-                haptics.play(Haptic.Select)
-            }
-            LyricsTranslationUiState.Loading -> Unit
-            LyricsTranslationUiState.SameLanguage -> {
-                haptics.play(Haptic.Tap)
-                PlayerPlatform.host.showMessage(alreadyRomanizedMessage)
-            }
-            LyricsTranslationUiState.Idle -> {
-                val source = lyrics.orEmpty()
-                if (source.isEmpty()) return@toggleRomanization
-                haptics.play(Haptic.Tap)
-                romanizationState = LyricsTranslationUiState.Loading
-                translationJob?.cancel()
-                if (translationState is LyricsTranslationUiState.Loading) {
-                    translationState = LyricsTranslationUiState.Idle
-                }
-                romanizationJob?.cancel()
-                romanizationJob = translationScope.launch {
-                    when (
-                        val result = PlayerPlatform.host.romanizeLyrics(
-                            trackId = trackId,
-                            lines = source,
-                            targetLanguageTag = translationLanguage,
-                        )
-                    ) {
-                        is LyricsRomanizationResult.Romanized -> {
-                            romanizationState = LyricsTranslationUiState.Ready(result.lines)
-                            lyricsDisplayMode = LyricsDisplayMode.Romanized
-                            translationTransition++
-                            haptics.play(Haptic.ToggleOn)
-                        }
-                        LyricsRomanizationResult.AlreadyRomanized -> {
-                            romanizationState = LyricsTranslationUiState.SameLanguage
-                            PlayerPlatform.host.showMessage(alreadyRomanizedMessage)
-                        }
-                        LyricsRomanizationResult.Unavailable -> {
-                            romanizationState = LyricsTranslationUiState.Idle
-                            PlayerPlatform.host.showMessage(romanizationUnavailableMessage)
-                        }
-                    }
-                }
-            }
-        }
-    }
+    val toggleTranslation = { select(LyricsDisplayMode.Translated) }
+    val toggleRomanization = { select(LyricsDisplayMode.Romanized) }
     // The one line that sits above the scrubber while the lyrics are open: which
     // of the providers the timings came from, or what the translation is doing.
-    // Worked out once for both layouts — the portrait player puts it over its
-    // half-player, the landscape one under its lyric column — so the two can
+    // Worked out once for both layouts â€” the portrait player puts it over its
+    // half-player, the landscape one under its lyric column â€” so the two can
     // never disagree about what it says.
     val status = when {
-        translationState is LyricsTranslationUiState.Loading ->
+        showingTranslation && translationState is LyricsTranslationUiState.Loading ->
             stringResource(Res.string.translating_lyrics_to, translationLanguageName)
-        romanizationState is LyricsTranslationUiState.Loading ->
+        showingRomanization && romanizationState is LyricsTranslationUiState.Loading ->
             stringResource(Res.string.romanizing_lyrics)
-        showingTranslation ->
-            stringResource(Res.string.lyrics_translated_to, translationLanguageName)
-        showingRomanization ->
-            stringResource(Res.string.lyrics_romanized)
-        translationState is LyricsTranslationUiState.SameLanguage ->
+        showingTranslation && translationState is LyricsTranslationUiState.SameLanguage ->
             stringResource(Res.string.lyrics_already_in_language, translationLanguageName)
-        romanizationState is LyricsTranslationUiState.SameLanguage ->
+        showingRomanization && romanizationState is LyricsTranslationUiState.SameLanguage ->
             stringResource(Res.string.lyrics_already_romanized)
+        showingTranslation && translationState is LyricsTranslationUiState.Unavailable ->
+            stringResource(Res.string.lyrics_translation_unavailable)
+        showingRomanization && romanizationState is LyricsTranslationUiState.Unavailable ->
+            stringResource(Res.string.lyrics_romanization_unavailable)
+        showingTranslation && translationState is LyricsTranslationUiState.Ready ->
+            stringResource(Res.string.lyrics_translated_to, translationLanguageName)
+        showingRomanization && romanizationState is LyricsTranslationUiState.Ready ->
+            stringResource(Res.string.lyrics_romanized)
         lyricsSource != null -> stringResource(Res.string.lyrics_by, lyricsSource.label)
         lyricsUnavailable -> stringResource(Res.string.no_lyrics_found)
         lyrics.isNullOrEmpty() -> loadingText

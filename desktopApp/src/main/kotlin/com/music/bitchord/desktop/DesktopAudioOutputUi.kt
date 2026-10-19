@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,10 +31,11 @@ import com.music.bitchord.ui.icons.BitChordIcons
 /**
  * Where playback is sent. Android routes through `AudioManager`; here the choice is a mixer.
  *
- * Enumerated when the dialog opens rather than held: devices come and go with what is plugged in.
+ * Refreshes in the background when opened; endpoint notifications keep the cached list current.
  */
 @Composable
 internal fun DesktopAudioOutputDialog(onDismiss: () -> Unit) {
+    LaunchedEffect(Unit) { DesktopAudioDevices.refresh() }
     val selected by DesktopAudioDevices.selected.collectAsState()
     val changes by DesktopAudioDevices.changes.collectAsState()
     val devices = remember(changes) { DesktopAudioDevices.available() }

@@ -3,6 +3,7 @@ package com.music.bitchord.ui.components
 import com.music.bitchord.ui.LocalPullToRefreshEnabled
 import com.music.bitchord.ui.AppUiHost
 import com.music.bitchord.ui.AppUi
+import com.music.bitchord.ui.rememberIsForeground
 import com.music.bitchord.sharedui.resources.*
 import org.jetbrains.compose.resources.stringResource
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -652,24 +653,7 @@ val PlayingAccent = Color(0xFFFB4A62)
 
 @Composable
 fun SearchPlayingBars(modifier: Modifier = Modifier) {
-    val heights = listOf(0.38f, 0.78f, 0.52f).mapIndexed { index, minimum ->
-        val transition = rememberInfiniteTransition(label = "search playing bar $index")
-        val height by transition.animateFloat(
-            initialValue = minimum,
-            targetValue = 1f - (index * 0.12f),
-            animationSpec = infiniteRepeatable(
-                animation = keyframes {
-                    durationMillis = 520 + index * 130
-                    minimum at 0
-                    1f at (260 + index * 50)
-                    minimum at durationMillis
-                },
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "search bar height $index",
-        )
-        height
-    }
+    val heights = rememberPlayingBarHeights()
     // The plate is a fixed square so only the bars move, never the box around them.
     Box(
         modifier = modifier
@@ -693,6 +677,30 @@ fun SearchPlayingBars(modifier: Modifier = Modifier) {
                 )
             }
         }
+    }
+}
+
+@Composable
+internal fun rememberPlayingBarHeights(): List<Float> {
+    val resting = listOf(0.38f, 0.78f, 0.52f)
+    if (!rememberIsForeground()) return resting
+    return resting.mapIndexed { index, minimum ->
+        val transition = rememberInfiniteTransition(label = "search playing bar $index")
+        val height by transition.animateFloat(
+            initialValue = minimum,
+            targetValue = 1f - (index * 0.12f),
+            animationSpec = infiniteRepeatable(
+                animation = keyframes {
+                    durationMillis = 520 + index * 130
+                    minimum at 0
+                    1f at (260 + index * 50)
+                    minimum at durationMillis
+                },
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "search bar height $index",
+        )
+        height
     }
 }
 

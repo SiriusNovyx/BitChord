@@ -37,6 +37,7 @@ var (
 	)
 	presenceLimiter = newIPRateLimiter(time.Minute, config.PresencePingsPerMinute, config.PresenceRateLimitMaxIPs)
 	upgrader = websocket.Upgrader{
+		Subprotocols: []string{socketProtocol},
 		CheckOrigin: func(r *http.Request) bool {
 			origin := r.Header.Get("Origin")
 			return origin == "" || config.IsAllowedOrigin(origin)
@@ -211,6 +212,30 @@ func parseBearerToken(r *http.Request) string {
 	parts := strings.SplitN(auth, " ", 2)
 	if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 		return strings.TrimSpace(parts[1])
+	}
+	return ""
+}
+
+// Browsers cannot set headers on a WebSocket handshake, so the web player
+// offers its token as a subprotocol instead: "bitchord.v1, bitchord.token.<hex>".
+// It still stays out of the URL, and so out of access logs, which is the reason
+// the header was chosen; the server answers with "bitchord.v1" alone and never
+// echoes the token.
+const (
+	socketProtocol    = "bitchord.v1"
+	socketTokenPrefix = "bitchord.token."
+)
+
+// parseSocketToken reads the party token from the Authorization header (the
+// apps) or from an offered subprotocol (browsers).
+func parseSocketToken(r *http.Request) string {
+	if token := parseBearerToken(r); token != "" {
+		return token
+	}
+	for _, protocol := range websocket.Subprotocols(r) {
+		if strings.HasPrefix(protocol, socketTokenPrefix) {
+			return strings.TrimPrefix(protocol, socketTokenPrefix)
+		}
 	}
 	return ""
 }
@@ -830,7 +855,7 @@ func handleInviteLanding(w http.ResponseWriter, r *http.Request) {
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	code := r.PathValue("code")
-	token := parseBearerToken(r)
+	token := parseSocketToken(r)
 	if token == "" {
 		http.Error(w, "missing token", http.StatusUnauthorized)
 		return
@@ -859,14 +884,15 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(config.WebSocketMaxBytes)
 	_ = conn.SetReadDeadline(time.Now().Add(time.Duration(config.ConnectionIdleMs) * time.Millisecond))
 
-	p.Lock()
-	p.MarkConnected(member, true)
-	p.Unlock()
-
-	sc := hubInst.Attach(p.Code, member.MemberId, conn)
-
 	// Send welcome frame
 	p.Lock()
+	if _, err := p.Authenticate(token); err != nil || p.Members[member.MemberId] != member {
+		p.Unlock()
+		_ = conn.Close()
+		return
+	}
+	sc := hubInst.Attach(p.Code, member.MemberId, conn)
+	p.MarkConnected(member, true)
 	welcome := map[string]interface{}{
 		"type":     protocol.FrameWelcome,
 		"you":      member.ToWire(),
@@ -881,10 +907,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Read loop
 	defer func() {
-		hubInst.Detach(p.Code, member.MemberId, sc)
 		_ = sc.Close()
 
 		p.Lock()
+		if !hubInst.Detach(p.Code, member.MemberId, sc) {
+			p.Unlock()
+			return
+		}
 		p.MarkConnected(member, false)
 		mFrame := membersFrame(p)
 		p.Unlock()
@@ -910,6 +939,9 @@ func handleSocketFrame(p *party.Party, member *party.Member, sc *hub.SafeConn, f
 
 	p.Lock()
 	defer p.Unlock()
+	if p.Members[member.MemberId] != member {
+		return
+	}
 	if !p.SpendFrameBudget(member) {
 		_ = sc.WriteJSON(map[string]interface{}{
 			"type": protocol.FrameError, "error": "rate_limited", "message": "Too many messages at once.",

@@ -14,9 +14,11 @@ internal object DesktopAnalysisRuntime {
 
     /** Where unpacked resources live, alongside the desktop log. */
     private val home: Path by lazy {
+        DesktopStorage.directory("analysis") {
         val base = System.getenv("XDG_DATA_HOME")?.takeIf { it.isNotBlank() }
             ?: "${System.getProperty("user.home")}/.local/share"
         Path.of(base, "bitchord", "analysis")
+        }
     }
 
     /** Where unpacked resources and cached analyses live. */
@@ -51,7 +53,7 @@ internal object DesktopAnalysisRuntime {
             "OrtSession" in text ||
             "onnxruntime" in text && "UnsatisfiedLink" in error::class.java.simpleName
         return if (missingRuntime) {
-            " — install the Microsoft Visual C++ Redistributable (x64); ONNX Runtime is built against it"
+            " — install the Microsoft Visual C++ Redistributable matching ${System.getProperty("os.arch")}; ONNX Runtime requires it"
         } else {
             ""
         }
@@ -80,8 +82,9 @@ internal object DesktopAnalysisRuntime {
      * one it replaces, and the stale copy was then loaded forever — a native fix that never ran.
      */
     private fun unpack(resource: String, name: String): Path {
-        Files.createDirectories(home)
-        val target = home.resolve(name)
+        val directory = if (resource.startsWith("/native/")) home.resolve("native/${System.getProperty("os.arch")}") else home
+        Files.createDirectories(directory)
+        val target = directory.resolve(name)
         val stream = javaClass.getResourceAsStream(resource)
             ?: error("$resource is missing from this build")
         stream.use { input ->

@@ -200,4 +200,10 @@
     <string name="search_library_empty">Pesquise as músicas da sua pasta de Música local.</string>
     <string name="search_library_hint">Músicas, artistas e álbuns</string>
     <string name="search_library_no_results">Nada na Música local corresponde a “%1$s”.</string>
+    <string name="analysis_absent">nenhuma faixa</string>
+    <string name="analysis_source_pending">fonte pendente</string>
+    <string name="analysis_unsupported_video">vídeo não suportado</string>
+    <string name="analysis_unsupported_source">fonte não suportada</string>
+    <string name="analysis_no_source">sem fonte para análise</string>
+    <string name="analysis_unavailable">analisador indisponível</string>
 </resources>

@@ -27,10 +27,30 @@ enum class TrackAnalysisState {
     FAILED,
 }
 
+/** Whether this particular playback source can be measured, independently of cached results. */
+enum class TrackAnalysisEligibility {
+    ABSENT,
+    UNKNOWN,
+    ELIGIBLE,
+    VIDEO,
+    SOURCE_POLICY,
+    NO_SOURCE,
+    ANALYSER_UNAVAILABLE,
+}
+
+data class TrackAnalysisStatus(
+    val eligibility: TrackAnalysisEligibility = TrackAnalysisEligibility.ABSENT,
+    val state: TrackAnalysisState = TrackAnalysisState.WAITING,
+) {
+    val isMeasured: Boolean
+        get() = eligibility == TrackAnalysisEligibility.ELIGIBLE &&
+            (state == TrackAnalysisState.ANALYSED || state == TrackAnalysisState.REFINING)
+}
+
 /** Both sides of the next transition, for stats for nerds. */
 data class SmartAnalysis(
-    val current: TrackAnalysisState = TrackAnalysisState.WAITING,
-    val next: TrackAnalysisState = TrackAnalysisState.WAITING,
+    val current: TrackAnalysisStatus = TrackAnalysisStatus(),
+    val next: TrackAnalysisStatus = TrackAnalysisStatus(),
 )
 
 /**

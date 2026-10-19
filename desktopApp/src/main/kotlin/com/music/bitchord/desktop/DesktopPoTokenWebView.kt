@@ -10,11 +10,7 @@ import com.music.bitchord.data.innertube.potoken.parseChallengeData
 import com.music.bitchord.data.innertube.potoken.parseIntegrityTokenData
 import com.music.bitchord.data.innertube.potoken.stringToU8
 import com.music.bitchord.data.innertube.potoken.u8ToBase64
-import javafx.application.Platform
-import javafx.concurrent.Worker
-import javafx.scene.web.WebEngine
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,37 +22,33 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import netscape.javascript.JSObject
 import okhttp3.Headers.Companion.toHeaders
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.Collections
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.Continuation
-import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * The phone's `PoTokenWebView`, on the desktop: BotGuard run in JavaFX's
- * WebView (WebKit) instead of Android's.
+ * The phone's `PoTokenWebView`, on the desktop: BotGuard runs in WebView2 on
+ * Windows ARM64 and JavaFX WebKit on the other desktop targets.
  *
  * The same page ([PO_TOKEN_HTML]), the same steps and the same timeouts: fetch
  * the challenge from `jnn/v1/Create`, run BotGuard, trade its answer for an
  * integrity token at `GenerateIT`, build the minter, then mint a PoToken per
- * identifier. What differs is only the browser's API — a WebEngine has no
- * base-URL load and no JavaScript console callback, so the bridge is installed
- * once the page has loaded and `console` is routed to it.
+ * identifier. The platform adapter owns browser initialization and cleanup;
+ * network requests and token generation stay shared between desktop targets.
  */
 class DesktopPoTokenWebView private constructor(
     // to be used exactly once only during initialization!
     private val continuation: Continuation<DesktopPoTokenWebView>,
 ) : PoTokenMinter {
-    private lateinit var engine: WebEngine
-    private val scope = CoroutineScope(SupervisorJob() + JavaFx)
+    private lateinit var engine: DesktopScriptBrowser
+    private val scope = CoroutineScope(SupervisorJob() + DesktopBrowserPlatform.dispatcher)
 
     // Guards the single-shot init continuation: an error can arrive from the page, from a
     // BotGuard request, or from a timeout, and a second resume would throw.
@@ -122,45 +114,35 @@ class DesktopPoTokenWebView private constructor(
         }
     }
 
-    /** Builds the page and starts BotGuard; on the FX thread. */
     private fun loadHtmlAndObtainBotguard() {
-        TrackLog.d(TAG, "loadHtmlAndObtainBotguard() called")
-        engine = WebEngine()
-        engine.userAgent = USER_AGENT
-        engine.setOnError { event -> onUncaught(event.message ?: "WebEngine error") }
-        engine.loadWorker.stateProperty().addListener { _, _, state ->
-            when (state) {
-                Worker.State.SUCCEEDED -> scope.launch(exceptionHandler) {
-                    val window = engine.executeScript("window") as JSObject
-                    window.setMember(JS_INTERFACE, bridge)
-                    // The page's own console, and its uncaught errors, into the track log.
-                    engine.executeScript(
-                        """(function() {
-                            function route(level) {
-                                return function() {
-                                    var parts = [];
-                                    for (var i = 0; i < arguments.length; i++) parts.push(String(arguments[i]));
-                                    $JS_INTERFACE.log(level, parts.join(' '));
-                                };
-                            }
-                            console.log = route('log');
-                            console.info = route('log');
-                            console.warn = route('warn');
-                            console.error = route('error');
-                            window.onerror = function(message, source, line) {
-                                $JS_INTERFACE.onJsInitializationError('Uncaught ' + message + ' (' + line + ')');
-                            };
-                        })()""",
-                    )
-                    engine.executeScript("$JS_INTERFACE.downloadAndRunBotguard()")
-                }
-                Worker.State.FAILED -> onInitializationErrorCloseAndCancel(
-                    PoTokenException("BotGuard page failed to load: ${engine.loadWorker.exception?.message}"),
-                )
-                else -> Unit
+        val loaded = {
+            scope.launch(exceptionHandler) {
+                engine.executeScript("""(function() {
+                    window.onerror = function(message) {
+                        $JS_INTERFACE.onJsInitializationError('Uncaught ' + message);
+                    };
+                    $JS_INTERFACE.downloadAndRunBotguard();
+                })()""")
             }
+            Unit
         }
-        engine.loadContent(PO_TOKEN_HTML, "text/html")
+        engine = if (DesktopBrowserPlatform.usesWebView2) {
+            DesktopWebView2.open(PO_TOKEN_HTML, loaded, { json ->
+                DesktopWebView2Protocol.message(json)?.let { (method, args) ->
+                    scope.launch(exceptionHandler) {
+                        when (method) {
+                            "downloadAndRunBotguard" -> bridge.downloadAndRunBotguard()
+                            "onJsInitializationError" -> bridge.onJsInitializationError(args[0])
+                            "onRunBotguardResult" -> bridge.onRunBotguardResult(args[0])
+                            "onMinterCreated" -> bridge.onMinterCreated()
+                            "onObtainPoTokenError" -> bridge.onObtainPoTokenError(args[0], args[1])
+                            "onObtainPoTokenResult" -> bridge.onObtainPoTokenResult(args[0], args[1])
+                            "log" -> Unit // Do not log browser script payloads or token values.
+                        }
+                    }
+                }
+            }, ::onUncaught)
+        } else JavaFxBrowser.open(PO_TOKEN_HTML, USER_AGENT, bridge, loaded, ::onUncaught)
     }
 
     private fun downloadAndRunBotguard() {
@@ -249,7 +231,7 @@ class DesktopPoTokenWebView private constructor(
     }
 
     private suspend fun generatePoTokenInternal(identifier: String, requestKey: String): String =
-        withContext(JavaFx) {
+        withContext(DesktopBrowserPlatform.dispatcher) {
             suspendCancellableCoroutine { cont ->
                 TrackLog.d(TAG, "PO-token generation requested")
                 poTokenContinuations[requestKey] = cont
@@ -343,10 +325,8 @@ class DesktopPoTokenWebView private constructor(
         if (closed) return
         closed = true
         scope.cancel()
-        runOnFx {
-            runCatching { if (::engine.isInitialized) engine.load("about:blank") }
-                .onFailure { TrackLog.w(TAG, "PO-token WebView teardown failed type=${it::class.simpleName ?: "unknown"}") }
-        }
+        runCatching { if (::engine.isInitialized) engine.close() }
+            .onFailure { TrackLog.w(TAG, "PO-token browser teardown failed") }
     }
 
     companion object {
@@ -361,14 +341,14 @@ class DesktopPoTokenWebView private constructor(
 
         private const val GENERATE_TIMEOUT_MS = 15_000L
 
-        /** Whether JavaFX could be started in this process; checked once. */
-        val available: Boolean by lazy { startFx() }
+        /** Whether the platform's browser runtime is available. */
+        val available: Boolean get() = DesktopBrowserPlatform.available
 
         suspend fun getNewPoTokenGenerator(): DesktopPoTokenWebView {
             var created: DesktopPoTokenWebView? = null
             try {
                 return withTimeout(INIT_TIMEOUT_MS) {
-                    withContext(JavaFx) {
+                    withContext(DesktopBrowserPlatform.dispatcher) {
                         suspendCancellableCoroutine { cont ->
                             val potWv = DesktopPoTokenWebView(cont)
                             created = potWv
@@ -394,30 +374,5 @@ class DesktopPoTokenWebView private constructor(
             }
         }
 
-        /** Starts the JavaFX toolkit without a window; it stays up for the process. */
-        private fun startFx(): Boolean = runCatching {
-            val started = CountDownLatch(1)
-            try {
-                Platform.startup { started.countDown() }
-            } catch (_: IllegalStateException) {
-                // Already running.
-                started.countDown()
-            }
-            Platform.setImplicitExit(false)
-            started.await()
-            true
-        }.onFailure { TrackLog.w(TAG, "JavaFX unavailable, no PoTokens on this desktop: ${it.message}") }
-            .getOrDefault(false)
-
-        private fun runOnFx(block: () -> Unit) {
-            if (Platform.isFxApplicationThread()) block() else Platform.runLater(block)
-        }
-    }
-
-    /** The JavaFX application thread, as a dispatcher — where a WebEngine must be touched. */
-    private object JavaFx : CoroutineDispatcher() {
-        override fun dispatch(context: CoroutineContext, block: Runnable) = runOnFx { block.run() }
-
-        override fun isDispatchNeeded(context: CoroutineContext): Boolean = !Platform.isFxApplicationThread()
     }
 }

@@ -1,6 +1,7 @@
 package com.music.bitchord.desktop
 
 import androidx.compose.runtime.CompositionLocalProvider
+import com.music.bitchord.ui.LocalVisualActivity
 import com.music.bitchord.ui.player.PlayerPlatform
 import com.music.bitchord.data.DebugLog
 import com.music.bitchord.data.TrackLog
@@ -27,8 +28,9 @@ import kotlin.math.roundToInt
 import org.jetbrains.compose.resources.painterResource
 
 fun main() {
+    DesktopStorage.install()
     // Before any WebView exists, so the sign-in window can start over with an empty jar.
-    DesktopWebCookies.install()
+    if (!DesktopBrowserPlatform.usesWebView2) DesktopWebCookies.install()
     DesktopWindowVisibility.install()
     // The player is the phone's, from the shared UI module; this is what it reads underneath.
     PlayerPlatform.install(DesktopPlayerHost)
@@ -123,12 +125,11 @@ private fun desktopMain() = application {
                 (composeWindow.contentPane as? javax.swing.JComponent)?.isOpaque = false
                 composeWindow.rootPane.isOpaque = false
             }
-            // AWT measures this in device pixels while Compose's window state is in dp. Keeping
-            // the scale in the conversion makes the usable minimum consistent on every display.
-            val transform = composeWindow.graphicsConfiguration.defaultTransform
+            // AWT window sizes are logical units; the JDK applies the monitor's DPI transform.
+            // Multiplying here scales twice and enlarges both the window and its minimum.
             composeWindow.minimumSize = Dimension(
-                (MIN_WINDOW_WIDTH_DP * transform.scaleX).roundToInt(),
-                (MIN_WINDOW_HEIGHT_DP * transform.scaleY).roundToInt(),
+                MIN_WINDOW_WIDTH_DP.roundToInt(),
+                MIN_WINDOW_HEIGHT_DP.roundToInt(),
             )
             // Setting AWT's minimum during the first composition can resize the native peer to
             // that minimum without updating Compose's state. Compose would then keep laying out a
@@ -136,8 +137,8 @@ private fun desktopMain() = application {
             // boundary off-screen until a maximize/restore cycle synchronised the two. Re-assert
             // the requested opening size on the native peer so both layers start in agreement.
             composeWindow.size = Dimension(
-                (openingSize.width.value * transform.scaleX).roundToInt(),
-                (openingSize.height.value * transform.scaleY).roundToInt(),
+                openingSize.width.value.roundToInt(),
+                openingSize.height.value.roundToInt(),
             )
             if (DesktopPlatform.isWindows && DesktopWindowsFrame.install("BitChord")) {
                 DesktopWindowBackdrop.apply()
@@ -175,9 +176,11 @@ private fun desktopMain() = application {
                 close = { if (DesktopWindowVisibility.onCloseRequest()) exitApplication() },
             )
         }
+        val visualActive by DesktopWindowVisibility.visualActive.collectAsState()
         CompositionLocalProvider(
             LocalDesktopWindowActions provides actions,
             LocalDesktopWindowScope provides this,
+            LocalVisualActivity provides visualActive,
         ) {
             BitChordDesktopApp()
         }

@@ -10,6 +10,8 @@ package com.music.bitchord.desktop
  */
 internal object DesktopWindowsAudio {
 
+    @Volatile private var lastDeviceName: String? = null
+
     private val available: Boolean by lazy {
         DesktopPlatform.isWindows &&
             runCatching { DesktopAnalysisRuntime.loadNative(LIBRARY) }
@@ -53,10 +55,14 @@ internal object DesktopWindowsAudio {
 
     fun close() {
         if (available) nativeClose()
+        lastDeviceName = null
     }
 
-    fun deviceName(): String? =
-        if (available) nativeDeviceName().takeIf(String::isNotBlank) else null
+    fun deviceName(): String? {
+        if (!available) return null
+        nativeDeviceName().takeIf(String::isNotBlank)?.let { lastDeviceName = it }
+        return lastDeviceName
+    }
 
     /**
      * The active render endpoints, keyed by their endpoint id; null when the native library is

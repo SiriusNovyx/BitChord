@@ -1,5 +1,9 @@
 package com.music.bitchord.desktop
 
+import com.music.bitchord.data.settings.LyricsDisplayMode
+
+import androidx.compose.runtime.LaunchedEffect
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -84,6 +88,7 @@ internal object DesktopPlayerHost : PlayerHost {
 
     @Composable
     override fun rememberAudioOutputs(): List<AudioOutputDevice> {
+        LaunchedEffect(Unit) { DesktopAudioDevices.refresh() }
         val selected by DesktopAudioDevices.selected.collectAsState()
         val changes by DesktopAudioDevices.changes.collectAsState()
         val devices = remember(changes) { DesktopAudioDevices.available() }
@@ -201,8 +206,8 @@ internal object DesktopPlayerSettings : PlayerSettingsSource {
     override val meteredConnection = MutableStateFlow<Boolean?>(false)
     override val preferUsbDac = MutableStateFlow(false)
     override val prioritizeSpotifyCanvas = MutableStateFlow(false)
-    override val reduceAnimation = MutableStateFlow(false)
-    override val reduceDynamicBlur = MutableStateFlow(false)
+    override val reduceAnimation = DesktopPerformance.reduceMotion
+    override val reduceDynamicBlur = DesktopPerformance.reduceBlur
     override val showNerdStats = MutableStateFlow(false)
     override val smartAnalysis = MutableStateFlow(SmartAnalysis())
     override val smartFadeEnabled = MutableStateFlow(false)
@@ -211,7 +216,9 @@ internal object DesktopPlayerSettings : PlayerSettingsSource {
     override val smartTransitionWindow = MutableStateFlow<TransitionWindow?>(null)
     override val spotifyCanvasAutoHide = MutableStateFlow(true)
     override val syncedLyrics = MutableStateFlow(true)
-    override val translationLanguage = MutableStateFlow("")
+    override val translationLanguage = DesktopTranslationSetting.language
+    private val lyricsDisplaySetting = DesktopLyricsDisplaySetting(persistence)
+    override val lyricsDisplayMode = lyricsDisplaySetting.mode
     override val versionAlignmentInProgress = MutableStateFlow(false)
 
     override fun setLastPlayerScreen(value: LastPlayerScreen) {
@@ -224,6 +231,8 @@ internal object DesktopPlayerSettings : PlayerSettingsSource {
         lyricsOffsetMs.value = clamped
         persistence.saveInt(KEY_LYRICS_OFFSET, clamped)
     }
+
+    override fun setLyricsDisplayMode(value: LyricsDisplayMode) = lyricsDisplaySetting.set(value)
 
     private const val KEY_LAST_SCREEN = "last_player_screen"
     private const val KEY_LYRICS_OFFSET = "lyrics_offset_ms"

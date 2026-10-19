@@ -200,4 +200,10 @@
     <string name="member_since">Member since</string>
     <string name="import_spotify">Import Spotify</string>
     <string name="import_spotify_subtitle">From a playlist link</string>
+    <string name="analysis_absent">none</string>
+    <string name="analysis_source_pending">source pending</string>
+    <string name="analysis_unsupported_video">unsupported video</string>
+    <string name="analysis_unsupported_source">unsupported source</string>
+    <string name="analysis_no_source">no analysis source</string>
+    <string name="analysis_unavailable">analyser unavailable</string>
 </resources>

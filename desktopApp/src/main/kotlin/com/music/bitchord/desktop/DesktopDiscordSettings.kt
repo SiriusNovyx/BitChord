@@ -47,11 +47,13 @@ internal object DesktopDiscordSettings {
     private fun flag(flow: MutableStateFlow<Boolean>, key: String, value: Boolean) {
         persistence.saveBoolean(key, value)
         flow.value = value
+        DesktopDiscordRpc.refreshActivity()
     }
 
     private fun text(flow: MutableStateFlow<String>, key: String, value: String) {
         persistence.saveString(key, value)
         flow.value = value
+        DesktopDiscordRpc.refreshActivity()
     }
 
     /** `{song_name}`, `{artist_name}` and `{album_name}`, filled in. */

@@ -200,4 +200,10 @@
     <string name="search_library_empty">Cerca i brani nella cartella Musica locale.</string>
     <string name="search_library_hint">Brani, artisti e album</string>
     <string name="search_library_no_results">Nulla in Musica locale corrisponde a «%1$s».</string>
+    <string name="analysis_absent">nessun brano</string>
+    <string name="analysis_source_pending">sorgente in attesa</string>
+    <string name="analysis_unsupported_video">video non supportato</string>
+    <string name="analysis_unsupported_source">sorgente non supportata</string>
+    <string name="analysis_no_source">nessuna sorgente da analizzare</string>
+    <string name="analysis_unavailable">analizzatore non disponibile</string>
 </resources>

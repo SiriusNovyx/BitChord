@@ -200,4 +200,10 @@
     <string name="search_library_empty">Поиск треков в папке локальной музыки.</string>
     <string name="search_library_hint">Треки, исполнители и альбомы</string>
     <string name="search_library_no_results">В локальной музыке нет ничего, совпадающего с «%1$s».</string>
+    <string name="analysis_absent">нет трека</string>
+    <string name="analysis_source_pending">ожидание источника</string>
+    <string name="analysis_unsupported_video">видео не поддерживается</string>
+    <string name="analysis_unsupported_source">источник не поддерживается</string>
+    <string name="analysis_no_source">нет источника для анализа</string>
+    <string name="analysis_unavailable">анализатор недоступен</string>
 </resources>

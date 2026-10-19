@@ -6,6 +6,7 @@ import com.music.bitchord.ui.components.ShelfRowChrome
 import com.music.bitchord.ui.components.ShelfRow
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
 import androidx.compose.ui.input.pointer.isBackPressed
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -64,6 +65,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -298,7 +300,6 @@ import com.music.bitchord.data.model.withoutRepeatsOf
 import com.music.bitchord.data.settings.AutomixPerformanceMode
 import com.music.bitchord.data.settings.LastPlayerScreen
 import com.music.bitchord.data.settings.SmartAnalysis
-import com.music.bitchord.data.settings.TrackAnalysisState
 import com.music.bitchord.data.settings.TransitionWindow
 import com.music.bitchord.ui.icons.BitChordIcons
 import dev.chrisbanes.haze.HazeState
@@ -439,7 +440,10 @@ internal fun desktopColorScheme() = darkColorScheme(
 
 @Composable
 internal fun desktopTypography(): Typography {
-    val sfProDisplay = FontFamily(
+    val selectedLanguage by DesktopStrings.language.collectAsState()
+    val sfProDisplay = if (useDesktopThaiFont(selectedLanguage.ifBlank { DesktopStrings.resolvedTag() }, "")) {
+        desktopThaiFontFamily()
+    } else FontFamily(
         composeFont(Res.font.sf_pro_display_regular, FontWeight.W400),
         composeFont(Res.font.sf_pro_display_medium, FontWeight.W500),
         composeFont(Res.font.sf_pro_display_semibold, FontWeight.W600),
@@ -678,10 +682,23 @@ fun BitChordDesktopApp() {
     var legacyMeshGradient by remember { mutableStateOf(persistence.boolean("legacy_mesh_gradient", false)) }
     var animatedCanvas by remember { mutableStateOf(persistence.boolean("animated_canvas", true)) }
     var spotifyCanvasCookie by remember { mutableStateOf(DesktopSpotifyToken.cookie()) }
+    val spotifyAccount by DesktopSpotifyAccount.session.profile.collectAsState()
+    val spotifyGrantSaved by DesktopSpotifyAccount.session.persistent.collectAsState()
+    val spotifyPlaybackAccount by DesktopSpotifyPlayback.session.profile.collectAsState()
     // Held here rather than by the Integrations page, so leaving the page does not close the
     // sign-in window.
     var spotifySignInJob by remember { mutableStateOf<Job?>(null) }
     var spotifySignInError by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        try {
+            DesktopSpotifyAccount.restore()
+            DesktopSpotifyPlayback.restore()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            spotifySignInError = "Spotify could not restore the connection. Reconnect to try again."
+        }
+    }
     var showNerdStats by remember { mutableStateOf(persistence.boolean("show_nerd_stats", false)) }
     var syncedLyrics by remember {
         mutableStateOf(persistence.boolean(DesktopLyricsClient.KEY_SYNCED_LYRICS, true))
@@ -866,8 +883,8 @@ fun BitChordDesktopApp() {
         playCurrent(startPlaying)
     }
 
-    /** Opens the Spotify sign-in window for an `sp_dc`, or closes the one already open. */
-    fun signInToSpotify() {
+    /** Opens browser consent after binding the callback; a second click cancels it. */
+    fun signInToSpotify(nativePlayback: Boolean = false) {
         spotifySignInJob?.let {
             it.cancel()
             return
@@ -875,14 +892,33 @@ fun BitChordDesktopApp() {
         spotifySignInError = null
         spotifySignInJob = scope.launch {
             try {
-                val cookie = DesktopWebSignIn.captureSpotify()
-                DesktopSpotifyToken.setCookie(cookie)
-                spotifyCanvasCookie = cookie
+                val openBrowser: (java.net.URI) -> Unit = { uri ->
+                    DesktopExternalLinks.open(uri.toString()).getOrElse {
+                        error("Could not open your browser. Check the default browser and try again.")
+                    }
+                }
+                if (nativePlayback) DesktopSpotifyPlayback.connect(openBrowser)
+                else DesktopSpotifyAccount.connect(openBrowser = openBrowser)
+                val nativeAccount = DesktopSpotifyPlayback.session.profile.value
+                if (nativeAccount != null && nativeAccount.accountId != DesktopSpotifyAccount.session.profile.value?.accountId) {
+                    DesktopSpotifyPlayback.disconnect()
+                }
+                collectionReloads++
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                DesktopTrackLog.log("sign-in: Spotify failed: ${failure.message}")
-                spotifySignInError = failure.message ?: "Could not complete the Spotify sign-in."
+                spotifySignInError = when (failure) {
+                    is SpotifyAuthorizationDenied -> "Spotify sign-in was declined."
+                    is java.net.BindException -> "Spotify callback port ${if (nativePlayback) 8898 else 43821} is in use. Close the other sign-in and try again."
+                    is SpotifyApiException -> if (failure.status == 429) failure.message
+                        else "Spotify could not connect (${failure.status}). Check this app's Spotify access and try again."
+                    is SpotifyPcmException -> when (failure.code) {
+                        311 -> "Spotify rejected native playback authentication (311: Premium required). This can also occur with a Premium account."
+                        316 -> "Playback was approved for another Spotify account. Reconnect using your library account."
+                        else -> "Spotify playback authentication failed (code ${failure.code}). Please try again later."
+                    }
+                    else -> "Could not complete Spotify sign-in. Check the app's redirect URI and try again."
+                }
             } finally {
                 spotifySignInJob = null
             }
@@ -1035,6 +1071,10 @@ fun BitChordDesktopApp() {
     /** Starts the station YouTube Music builds around one track. */
     fun startRadio(song: Song) {
         if (partyTrackChangeBlocked()) return
+        if (song.isNativeSpotify) {
+            DesktopPlayerHost.showMessage("Spotify radio is unavailable in this player. Play a playlist or add tracks to the queue.")
+            return
+        }
         val seed = canonicalSong(song).copy(radioName = song.title)
         scope.launch {
             // AutoPlay's section behind the seed, as the phone queues a station — which is also
@@ -1236,6 +1276,7 @@ fun BitChordDesktopApp() {
 
     fun loadAutoplaySongs(playFirst: Boolean = false) {
         val current = selectedSong ?: return
+        if (current.isNativeSpotify) return
         val party = DesktopListenTogether.state.value
         if (!DesktopAutoplay.enabled(party, autoplay) ||
             repeatMode == DesktopRepeatMode.ALL ||
@@ -1343,6 +1384,9 @@ fun BitChordDesktopApp() {
         autoplayJob?.cancel()
         autoplayJob = null
         autoplaySeed = null
+        if (enabled && selectedSong?.isNativeSpotify == true) {
+            DesktopPlayerHost.showMessage("Spotify radio is unavailable; tracks already queued will still play.")
+        }
         if (DesktopListenTogether.state.value.inParty) {
             // As on the phone, the server owns the effective setting and queue while connected.
             // Keep the personal preference for after leaving, but do not trim or top up this one
@@ -1908,6 +1952,8 @@ fun BitChordDesktopApp() {
     }
     LaunchedEffect(playback.song?.videoId, playback.isPlaying, playback.durationMs) {
         DesktopScrobbling.onPlaybackStateChanged(playback)
+    }
+    LaunchedEffect(playback.song?.videoId, playback.isPlaying, playback.durationMs, playback.seeks) {
         DesktopWindowsMedia.publish(playback)
     }
     // Refetched on opening the page rather than cached for the session: the
@@ -1927,7 +1973,7 @@ fun BitChordDesktopApp() {
     }
     // Keyed on the same things, plus the rate: Discord counts the bar down on
     // its own clock, so only a change to what it was told is worth another push.
-    LaunchedEffect(playback.song?.videoId, playback.isPlaying, playback.durationMs, playbackSpeed) {
+    LaunchedEffect(discordPlaybackRevision(playback, playbackSpeed)) {
         DesktopDiscordRpc.onPlaybackStateChanged(playback, playbackSpeed)
     }
     // The account's own history on YouTube Music, which is what the home feed is built out of.
@@ -2251,7 +2297,7 @@ fun BitChordDesktopApp() {
     }
 
     /** The Library's folder rows: the two folders this computer has, and Spotify once connected. */
-    val libraryLinks = remember(spotifyCanvasCookie.isNotBlank()) {
+    val libraryLinks = remember(spotifyCanvasCookie.isNotBlank(), spotifyAccount) {
         listOfNotNull(
             LibraryLink(
                 item = ShelfItem(
@@ -2284,7 +2330,7 @@ fun BitChordDesktopApp() {
                 ),
                 icon = Icons.Rounded.Cloud,
                 logo = SharedRes.drawable.spotify_logo,
-            ).takeIf { spotifyCanvasCookie.isNotBlank() },
+            ).takeIf { spotifyCanvasCookie.isNotBlank() || spotifyAccount != null },
         )
     }
 
@@ -2293,7 +2339,11 @@ fun BitChordDesktopApp() {
         libraryShowAll = HomeShelf(SPOTIFY_SHELF, emptyList())
         spotifyLibraryStatus = "Loading your Spotify playlists…"
         scope.launch {
-            runCatching { SpotifyLibrary.playlists() }
+            runCatching {
+                if (DesktopSpotifyAccount.session.profile.value != null) {
+                    DesktopSpotifyAccount.session.withToken { DesktopSpotifyAccount.api.playlists(it) }
+                } else SpotifyLibrary.playlists()
+            }
                 .onSuccess { found ->
                     spotifyLibraryStatus = null
                     if (libraryShowAll?.title == SPOTIFY_SHELF) {
@@ -2989,6 +3039,11 @@ fun BitChordDesktopApp() {
         partySyncHolder[0]?.onLocalIntent()
     }
 
+    val fontAppLanguage by DesktopStrings.language.collectAsState()
+    val fontTranslationLanguage by DesktopTranslationSetting.language.collectAsState()
+    val thaiFontFamily = if (useDesktopThaiFont(
+        fontAppLanguage.ifBlank { DesktopStrings.resolvedTag() }, fontTranslationLanguage,
+    )) desktopThaiFontFamily() else null
     MaterialTheme(
         colorScheme = desktopColorScheme(),
         typography = desktopTypography(),
@@ -2998,6 +3053,7 @@ fun BitChordDesktopApp() {
         CompositionLocalProvider(
             LocalContentColor provides Color.White,
             LocalNowPlaying provides selectedSong,
+            com.music.bitchord.ui.LocalThaiFontFamily provides thaiFontFamily,
         ) {
             DesktopFrame(
                 // The phone's page is black, not the near-black of its cards.
@@ -3031,12 +3087,13 @@ fun BitChordDesktopApp() {
                             goBack()
                             true
                         }
-                        DesktopPlatform.isMac && event.isMetaPressed && event.key == Key.Comma -> {
+                        ((DesktopPlatform.isMac && event.isMetaPressed) || (!DesktopPlatform.isMac && event.isCtrlPressed)) && event.key == Key.Comma -> {
                             openSettings()
                             true
                         }
-                        DesktopPlatform.isMac && event.isMetaPressed && event.key == Key.F -> {
-                            searchFocusRequested = true
+                        ((DesktopPlatform.isMac && event.isMetaPressed) || (!DesktopPlatform.isMac && event.isCtrlPressed)) && event.key == Key.F -> {
+                            overlays.nowPlaying = false
+                            selectDestination(DesktopDestination.SEARCH)
                             true
                         }
                         DesktopPlatform.isMac && event.isMetaPressed && event.key == Key.W -> {
@@ -3509,13 +3566,15 @@ fun BitChordDesktopApp() {
                         )
                     }
                 },
-            ) { contentPadding ->
+            ) { contentPadding, compact ->
                 // Desktop pages start at the same top edge as Library. Only preserve space for the
                 // floating player/navigation bar at the bottom in compact windows.
                 val sharedPagePadding = PaddingValues(bottom = contentPadding.calculateBottomPadding())
                 CompositionLocalProvider(
                     LocalPullToRefreshEnabled provides false,
                     LocalShelfRowChrome provides DesktopShelfRowChrome,
+                    com.music.bitchord.ui.LocalVisualActivity provides
+                        (com.music.bitchord.ui.LocalVisualActivity.current && !overlays.nowPlaying),
                 ) {
                 DesktopPointerMenuHost<Song>(
                     menu = { song, onDismiss ->
@@ -3790,13 +3849,25 @@ fun BitChordDesktopApp() {
                                 DesktopSettingsPage.INTEGRATIONS -> DesktopIntegrationsDialog(
                                     song = playback.song,
                                     spotify = DesktopSpotifyConnection(
-                                        connected = spotifyCanvasCookie.isNotBlank(),
-                                        canSignIn = DesktopWebSignIn.available,
+                                        connected = spotifyAccount != null,
+                                        accountLabel = spotifyAccount?.displayName,
+                                        persistent = spotifyGrantSaved,
+                                        canvasConnected = spotifyCanvasCookie.isNotBlank(),
+                                        nativeAvailable = DesktopSpotifyRuntime.available,
+                                        nativeAuthorized = spotifyPlaybackAccount != null,
                                         signingIn = spotifySignInJob != null,
                                         error = spotifySignInError,
-                                        onSignIn = ::signInToSpotify,
+                                        onSignIn = { signInToSpotify() },
+                                        onNativeSignIn = { signInToSpotify(nativePlayback = true) },
                                         onPasteCookie = { overlays.settingsPage = DesktopSettingsPage.SPOTIFY_CANVAS },
                                         onDisconnect = {
+                                            spotifySignInJob?.cancel()
+                                            DesktopSpotifyAccount.session.disconnect()
+                                            DesktopSpotifyPlayback.disconnect()
+                                            if (playback.song?.isNativeSpotify == true) playbackEngine.pause()
+                                            libraryShowAll = null
+                                        },
+                                        onDisconnectCanvas = {
                                             DesktopSpotifyToken.setCookie("")
                                             spotifyCanvasCookie = ""
                                         },
@@ -4009,7 +4080,7 @@ fun BitChordDesktopApp() {
                             onTypeaheadLongPress = ::openMenu,
                             contentPadding = sharedPagePadding,
                             topPadding = 0.dp,
-                            showField = false,
+                            showField = compact,
                         )
                         destination == DesktopDestination.LIBRARY && libraryShowAll != null -> Column(Modifier.fillMaxSize()) {
                             // The phone keeps the grid's sort beside it, in the bar above; here it sits
@@ -4810,10 +4881,16 @@ private fun DesktopFrame(
     /** The column on the far side of the page — the lyrics or the queue, when one is open. */
     trailing: @Composable () -> Unit = {},
     overlay: @Composable () -> Unit = {},
-    content: @Composable (PaddingValues) -> Unit,
+    content: @Composable (PaddingValues, Boolean) -> Unit,
 ) {
     // Held out here rather than inside the constraints box.
     val haze = remember { HazeState() }
+    val keyboardFocus = remember { FocusRequester() }
+    var frameHasFocus by remember { mutableStateOf(false) }
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    LaunchedEffect(windowFocused) {
+        if (windowFocused && !frameHasFocus) keyboardFocus.requestFocus()
+    }
     // With a system material active, the window stays clear under its chrome. The app-background
     // preference decides whether the page and side column also stay clear or retain their solid
     // gray ground.
@@ -4827,6 +4904,9 @@ private fun DesktopFrame(
         Box(
             modifier
                 .fillMaxSize()
+                .focusRequester(keyboardFocus)
+                .onFocusChanged { frameHasFocus = it.hasFocus }
+                .focusable()
                 .then(if (roundCorners) Modifier.clip(RoundedCornerShape(10.dp)) else Modifier)
                 .then(if (glass) Modifier else Modifier.background(containerColor)),
         ) {
@@ -4869,6 +4949,7 @@ private fun DesktopFrame(
                                                 // last row can still be scrolled clear of it.
                                                 bottom = if (compact) 128.dp else 16.dp,
                                             ),
+                                            compact,
                                         )
                                     }
                                     if (compact) {
@@ -5706,6 +5787,34 @@ private fun DesktopSettingsScreen(
             }
             if (section == DesktopSettingsSection.DESKTOP_PLAYBACK) item {
                 SettingsGroup(DesktopStrings["d_desktop_playback", "Desktop playback"]) {
+                    val performanceMode by DesktopPerformance.mode.collectAsState()
+                    if (settingsRowVisible("Visual performance", "Artwork, motion and blur")) {
+                        Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+                            Text("Visual performance", fontWeight = FontWeight.Medium)
+                            Text("Artwork, motion and blur", color = DesktopSecondary, style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                DesktopPerformanceMode.entries.forEach { mode ->
+                                    FilterChip(
+                                        colors = desktopChipColors(),
+                                        selected = performanceMode == mode,
+                                        onClick = { DesktopPerformance.setMode(mode) },
+                                        label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) },
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                when (performanceMode) {
+                                    DesktopPerformanceMode.EFFICIENT -> "Static artwork and reduced effects"
+                                    DesktopPerformanceMode.BALANCED -> "Normal visuals, paused in the background"
+                                    DesktopPerformanceMode.PERFORMANCE -> "Full visuals while visible"
+                                },
+                                color = DesktopSecondary,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
                     SettingsToggle(
                         DesktopStrings["autoplay", "Autoplay"],
                         DesktopStrings["d_keep_the_music_going_with_similar_songs", "Keep the music going with similar songs"],
@@ -7010,7 +7119,7 @@ private fun Modifier.desktopFrosted(
     fade: Float = 0f,
 ): Modifier {
     val haze = LocalDesktopHaze.current
-    val reduceDynamicBlur by DesktopAppearanceSettings.reduceDynamicBlur.collectAsState()
+    val reduceDynamicBlur by DesktopPerformance.reduceBlur.collectAsState()
     if (haze == null || reduceDynamicBlur) {
         return this.background(edge.dissolve(opaque, fade) ?: SolidColor(opaque))
     }
@@ -7060,15 +7169,6 @@ private fun AutomixPerformanceMode.detail(): String = when (this) {
         "2 threads · recommended balance of speed, heat and battery"
     AutomixPerformanceMode.PERFORMANCE ->
         "4 threads · fastest analysis · higher heat and battery use"
-}
-
-/** Android's wording for the Automix line, so both players read alike. */
-private fun TrackAnalysisState.label(): String = when (this) {
-    TrackAnalysisState.ANALYSED -> "analysed"
-    TrackAnalysisState.REFINING -> "analysed, refining…"
-    TrackAnalysisState.ANALYSING -> "analysing…"
-    TrackAnalysisState.WAITING -> "waiting"
-    TrackAnalysisState.FAILED -> "failed"
 }
 
 @Composable

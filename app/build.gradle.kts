@@ -3,9 +3,22 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.android") apply false
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+val modernBuild = providers.gradleProperty("bitchord.modernBuild").orNull == "true"
+if (!modernBuild) {
+    apply(plugin = "org.jetbrains.kotlin.android")
+    extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension> {
+        compilerOptions.jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+if (modernBuild) {
+    extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinTopLevelExtension> {
+        jvmToolchain(21)
+    }
 }
 
 /**
@@ -204,6 +217,7 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+        resValues = true
     }
     testOptions {
         unitTests {
@@ -215,12 +229,6 @@ android {
             // logic it was written to check.
             isReturnDefaultValues = true
         }
-    }
-}
-
-kotlin {
-    compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

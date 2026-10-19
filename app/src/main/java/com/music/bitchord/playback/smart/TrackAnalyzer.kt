@@ -35,6 +35,9 @@ import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.AutomixPerformanceMode
+import com.music.bitchord.data.settings.TrackAnalysisEligibility
+import com.music.bitchord.data.settings.TrackAnalysisState
+import com.music.bitchord.data.settings.TrackAnalysisStatus
 import com.music.bitchord.data.sources.SourceResolver
 import com.music.bitchord.data.sources.TrackMatcher
 import com.music.bitchord.playback.AudioCache
@@ -43,6 +46,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -115,9 +119,11 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
 
     private val results = ConcurrentHashMap<String, TrackAnalysis>()
     private val running = ConcurrentHashMap.newKeySet<String>()
+    private val active = ConcurrentHashMap.newKeySet<String>()
     private val sourceAnalysisUris = ConcurrentHashMap<String, Uri>()
     private val sourceResolutions = ConcurrentHashMap.newKeySet<String>()
     private val sourceResolutionAttempted = ConcurrentHashMap.newKeySet<String>()
+    private val sourceResolutionFailed = ConcurrentHashMap.newKeySet<String>()
     private val sourceResolutionScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Tracks whose result came from [analyzeHead] and is waiting to be superseded. */
@@ -240,7 +246,31 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
      * is the difference between something being wrong and something simply
      * taking the several seconds it takes.
      */
-    fun isAnalysing(trackId: String): Boolean = trackId in running
+    fun isAnalysing(trackId: String): Boolean = trackId in active
+
+    fun statusFor(trackId: String, playbackUri: Uri?): TrackAnalysisStatus {
+        if (trackId.isBlank()) return TrackAnalysisStatus()
+        val eligibility = when {
+            playbackUri == null -> TrackAnalysisEligibility.UNKNOWN
+            SourceResolver.isPickedAddonRow(playbackUri) -> TrackAnalysisEligibility.SOURCE_POLICY
+            !TrackFeatures.available -> TrackAnalysisEligibility.ANALYSER_UNAVAILABLE
+            LocalAudioSource.isLocal(playbackUri) || playbackUri.getQueryParameter("v") != null -> TrackAnalysisEligibility.ELIGIBLE
+            playbackUri.authority != "source" -> TrackAnalysisEligibility.NO_SOURCE
+            sourceAnalysisUris.containsKey(trackId) -> TrackAnalysisEligibility.ELIGIBLE
+            trackId in sourceResolutionFailed -> TrackAnalysisEligibility.UNKNOWN
+            trackId in sourceResolutionAttempted -> TrackAnalysisEligibility.NO_SOURCE
+            else -> TrackAnalysisEligibility.UNKNOWN
+        }
+        val analysis = results[trackId]
+        val state = when {
+            eligibility == TrackAnalysisEligibility.UNKNOWN && trackId in sourceResolutionFailed -> TrackAnalysisState.FAILED
+            analysis?.isUsable == true -> if (trackId in active) TrackAnalysisState.REFINING else TrackAnalysisState.ANALYSED
+            trackId in active -> TrackAnalysisState.ANALYSING
+            analysis?.status == TrackAnalysis.STATUS_READY -> TrackAnalysisState.FAILED
+            else -> TrackAnalysisState.WAITING
+        }
+        return TrackAnalysisStatus(eligibility, state)
+    }
 
     /**
      * Queues [trackId] (playing at [uri]) for analysis if it is not already
@@ -266,6 +296,7 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
      */
     fun request(trackId: String, uri: Uri, durationSeconds: Double) {
         if (trackId.isBlank()) return
+        if (statusFor(trackId, uri).eligibility !in setOf(TrackAnalysisEligibility.ELIGIBLE, TrackAnalysisEligibility.UNKNOWN)) return
         // Before anything else this would spend: [analysisUriFor] alone can put
         // a catalogue match on the network for a track the party will never
         // mix. See [stopped].
@@ -364,6 +395,7 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
 
         executor.execute {
             try {
+                active.add(trackId)
                 // Efficient mode yields to decoding and playback rather than
                 // competing for a core. Thread count remains the speed knob.
                 Process.setThreadPriority(
@@ -449,6 +481,7 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
                     provisional.remove(trackId)
                 }
             } finally {
+                active.remove(trackId)
                 running.remove(trackId)
                 // The session holds the model's arena and a parsed ONNX graph in native heap for
                 // as long as it is open, which a backgrounded music player cannot justify between
@@ -818,6 +851,11 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
      */
     private fun analysisUriFor(trackId: String, playbackUri: Uri): Uri? {
         if (playbackUri.getQueryParameter("v") != null || playbackUri.authority != "source") return playbackUri
+        // Never for a row picked from the Addons search: that would put a
+        // YouTube search and its Opus on the network under a track whose whole
+        // point is not being YouTube. Left unmeasured, as a party leaves every
+        // track — see [SourceResolver.MIX_PARAM].
+        if (SourceResolver.isPickedAddonRow(playbackUri)) return null
         sourceAnalysisUris[trackId]?.let { return it }
         if (trackId in sourceResolutionAttempted) return null
         if (!sourceResolutions.add(trackId)) return null
@@ -831,7 +869,10 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
                 } else {
                     Log.d(TAG, "No YouTube match for Automix analysis of $trackId")
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
+                sourceResolutionFailed.add(trackId)
                 Log.d(TAG, "YouTube match failed for Automix analysis of $trackId: ${error.message}")
             } finally {
                 sourceResolutionAttempted.add(trackId)
@@ -843,15 +884,13 @@ class TrackAnalyzer(private val context: Context, private val cache: AudioCache)
 
     private suspend fun findYouTubeMatch(target: TrackMatcher.Target): com.music.bitchord.data.model.Song? {
         if (target.title.isBlank()) return null
-        for (query in TrackMatcher.queries(target)) {
+        return findAnalysisSource(TrackMatcher.queries(target)) { query ->
             val candidates = YtMusicRepository.search(query, SearchFilter.SONGS)
-                .getOrNull()
-                ?.filterIsInstance<SearchResult.Track>()
-                ?.map { it.song }
-                .orEmpty()
-            TrackMatcher.best(candidates, target)?.let { return it }
+                .getOrThrow()
+                .filterIsInstance<SearchResult.Track>()
+                .map { it.song }
+            TrackMatcher.best(candidates, target)
         }
-        return null
     }
 
     /**

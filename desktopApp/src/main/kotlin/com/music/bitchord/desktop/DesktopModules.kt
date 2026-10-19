@@ -146,13 +146,7 @@ private class DesktopModuleEngine(
     private val jsCode: String,
     private val baseUrl: String,
 ) : AutoCloseable {
-    private val context = Context.newBuilder("js")
-        .allowHostAccess(HostAccess.NONE)
-        .allowHostClassLookup { false }
-        .allowIO(false)
-        .allowNativeAccess(false)
-        .allowCreateThread(false)
-        .build()
+    private val context = DesktopModuleRuntime.context()
 
     init {
         val bindings = context.getBindings("js")

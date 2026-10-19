@@ -1,0 +1,27 @@
+--- a/src/connection/handshake.rs
++++ b/src/connection/handshake.rs
+@@ -101,1 +101,16 @@
++#[cfg(all(test, target_os = "windows"))]
++mod bitchord_platform_tests {
++    use super::*;
++    #[tokio::test]
++    async fn native_desktop_platform_tag() {
++        let mut transport = Vec::new();
++        let packet = client_hello(&mut transport, vec![1]).await.unwrap();
++        let hello = ClientHello::parse_from_bytes(&packet[6..]).unwrap();
++        let expected = if cfg!(target_arch = "x86") { Platform::PLATFORM_WIN32_X86 }
++            else { Platform::PLATFORM_WIN32_X86_64 };
++        assert_eq!(hello.build_info.as_ref().unwrap().platform(), expected);
++        assert_eq!(transport, packet);
++    }
++}
++
+ async fn client_hello<T>(connection: &mut T, gc: Vec<u8>) -> io::Result<Vec<u8>>
+@@ -141,4 +156,5 @@
+         "windows" => match ARCH {
+-            "arm" | "aarch64" => Platform::PLATFORM_WINDOWS_CE_ARM,
+-            "x86_64" => Platform::PLATFORM_WIN32_X86_64,
++            // The protocol has no modern Windows ARM tag. Windows CE is rejected
++            // by Spotify's desktop access point even for Premium accounts.
++            "arm" | "aarch64" | "x86_64" => Platform::PLATFORM_WIN32_X86_64,
+             _ => Platform::PLATFORM_WIN32_X86,

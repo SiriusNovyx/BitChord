@@ -197,7 +197,8 @@ internal object DesktopMusicSources {
         qualityOverride: String? = null,
         excludedSourceId: String? = null,
         forDownload: Boolean = false,
-    ): Result<DesktopStream> = DesktopSourceRegistry.resolve(song, qualityOverride, excludedSourceId, forDownload)
+    ): Result<DesktopStream> = if (song.isNativeSpotify) DesktopSpotifyStreams.resolve(song, forDownload)
+        else DesktopSourceRegistry.resolve(song, qualityOverride, excludedSourceId, forDownload)
 
     /** As [resolve], but for playback: races the sources and reports what is still running. */
     suspend fun resolveLive(
@@ -205,11 +206,12 @@ internal object DesktopMusicSources {
         qualityOverride: String? = null,
         excludedSourceId: String? = null,
     ): Result<DesktopLiveResolution> =
-        DesktopSourceRegistry.resolveLive(song, qualityOverride, excludedSourceId)
+        if (song.isNativeSpotify) DesktopSpotifyStreams.resolve(song).map { DesktopLiveResolution(it) }
+        else DesktopSourceRegistry.resolveLive(song, qualityOverride, excludedSourceId)
 
     /** A second look, asked from scratch once the first one settled for nothing better. */
     suspend fun upgradeFor(song: Song, playing: DesktopStream?): DesktopStream? =
-        DesktopSourceRegistry.upgradeFor(song, playing)
+        if (song.isNativeSpotify) null else DesktopSourceRegistry.upgradeFor(song, playing)
 
     /** The quality rung in force. */
     fun ceiling(qualityOverride: String? = null): DesktopAudioQuality =
@@ -218,9 +220,9 @@ internal object DesktopMusicSources {
     fun worthSwapping(candidate: DesktopStreamFormat, playing: DesktopStreamFormat?): Boolean =
         DesktopSourceRegistry.worthSwapping(candidate, playing)
 
-    fun sourceNameFor(stream: DesktopStream): String = DesktopSourceRegistry.sourceNameFor(stream)
+    fun sourceNameFor(stream: DesktopStream): String = if (stream.sourceId == "spotify-native") "Spotify" else DesktopSourceRegistry.sourceNameFor(stream)
 
-    fun hasYouTubeOriginal(song: Song): Boolean = DesktopSourceRegistry.hasYouTubeOriginal(song)
+    fun hasYouTubeOriginal(song: Song): Boolean = !song.isNativeSpotify && DesktopSourceRegistry.hasYouTubeOriginal(song)
 
-    fun mayServeFromAddon(song: Song): Boolean = DesktopSourceRegistry.mayServeFromAddon(song)
+    fun mayServeFromAddon(song: Song): Boolean = !song.isNativeSpotify && DesktopSourceRegistry.mayServeFromAddon(song)
 }

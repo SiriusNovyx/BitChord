@@ -5,6 +5,7 @@
 /app/build/
 /desktopApp/bin/
 build/
+!**/com/music/bitchord/build/
 gradle-app.setting
 !gradle-wrapper.jar
 !gradle-wrapper.properties
@@ -40,6 +41,8 @@ keystore.properties
 .shots/
 .tmp_verify/
 .debug/
+.work/
+desktopApp/native-dependencies/
 
 # AI agent configuration
 AGENTS.md

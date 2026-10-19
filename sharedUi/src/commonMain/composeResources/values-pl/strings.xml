@@ -200,4 +200,10 @@
     <string name="search_library_empty">Szukaj utworów w folderze muzyki lokalnej.</string>
     <string name="search_library_hint">Utwory, wykonawcy i albumy</string>
     <string name="search_library_no_results">NIC w muzyce lokalnej nie pasuje do „%1$s”.</string>
+    <string name="analysis_absent">brak utworu</string>
+    <string name="analysis_source_pending">oczekiwanie na źródło</string>
+    <string name="analysis_unsupported_video">nieobsługiwane wideo</string>
+    <string name="analysis_unsupported_source">nieobsługiwane źródło</string>
+    <string name="analysis_no_source">brak źródła do analizy</string>
+    <string name="analysis_unavailable">analizator niedostępny</string>
 </resources>

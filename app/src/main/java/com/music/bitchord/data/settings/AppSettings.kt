@@ -409,6 +409,7 @@ object AppSettings {
      * happened to be reading the day the setting was written.
      */
     val translationLanguage = MutableStateFlow("")
+    val lyricsDisplayMode = MutableStateFlow(LyricsDisplayMode.Original)
 
     /**
      * Plays a looping video behind the cover art on the player when one is
@@ -838,6 +839,7 @@ object AppSettings {
         lyricsOffsetMs.value = prefs.getInt(KEY_LYRICS_OFFSET_MS, 0)
             .coerceIn(MIN_LYRICS_OFFSET_MS, MAX_LYRICS_OFFSET_MS)
         translationLanguage.value = prefs.getString(KEY_TRANSLATION_LANGUAGE, "").orEmpty()
+        lyricsDisplayMode.value = LyricsDisplayMode.fromStored(prefs.getString(KEY_LYRICS_DISPLAY_MODE, null))
         if (highPerformanceMode.value) {
             reduceAnimation.value = false
             reduceDynamicBlur.value = false
@@ -1269,6 +1271,11 @@ object AppSettings {
     fun setTranslationLanguage(value: String) {
         translationLanguage.value = value
         prefs.edit().putString(KEY_TRANSLATION_LANGUAGE, value).apply()
+    }
+
+    fun setLyricsDisplayMode(value: LyricsDisplayMode) {
+        lyricsDisplayMode.value = value
+        prefs.edit().putString(KEY_LYRICS_DISPLAY_MODE, value.storageKey).apply()
     }
 
     fun setSyncedLyrics(value: Boolean) {
@@ -1963,6 +1970,7 @@ object AppSettings {
     private const val KEY_LYRICS_BLUR = "lyrics_blur"
     private const val KEY_LYRICS_OFFSET_MS = "lyrics_offset_ms"
     private const val KEY_TRANSLATION_LANGUAGE = "translation_language"
+    private const val KEY_LYRICS_DISPLAY_MODE = "lyrics_display_mode"
     private const val KEY_ANIMATED_CANVAS = "animated_canvas"
     private const val KEY_CANVAS_OVER_CELLULAR = "canvas_over_cellular"
     private const val KEY_SPOTIFY_CANVAS_AUTO_HIDE = "spotify_canvas_auto_hide"

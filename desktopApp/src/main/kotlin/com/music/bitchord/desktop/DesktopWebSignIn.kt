@@ -21,8 +21,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 
 /**
  * In-app sign-in, as Android does it: the provider's own web login in a WebView, and the session read
- * from that WebView's cookie jar. The WebView is JavaFX's, the one BotGuard already runs in, so this
- * needs no browser installed, decrypts nothing, and is the same on Windows, macOS and Linux.
+ * from that WebView's cookie jar. Windows ARM64 uses the installed WebView2 Runtime;
+ * the other desktop targets use JavaFX, as BotGuard does.
  *
  * YouTube Music waits for "Use this profile", as the phone does, so a multi-channel account can pick
  * its identity on the page first. Spotify is taken the moment `sp_dc` is set: JavaFX's WebKit has no
@@ -45,7 +45,7 @@ internal object DesktopWebSignIn {
         ),
     }
 
-    /** Whether a sign-in window can be shown at all: it needs the JavaFX toolkit. */
+    /** Whether the platform browser runtime can show a sign-in window. */
     val available: Boolean get() = DesktopPoTokenWebView.available
 
     /** The music.youtube.com `Cookie` header, once the listener confirms the profile. */
@@ -55,6 +55,7 @@ internal object DesktopWebSignIn {
     suspend fun captureSpotify(): String = capture(Service.SPOTIFY)
 
     private suspend fun capture(service: Service): String {
+        if (DesktopBrowserPlatform.usesWebView2) return DesktopWebView2SignIn.capture(service)
         check(available) { "This desktop cannot show a sign-in window (JavaFX did not start)." }
         return suspendCancellableCoroutine { continuation ->
             Platform.runLater {
@@ -192,12 +193,16 @@ internal object DesktopWebSignIn {
  */
 internal object DesktopWebCookies : CookieHandler() {
     @Volatile
-    private var jar: CookieHandler = com.sun.webkit.network.CookieManager()
+    private var jar: CookieHandler = newJar()
+
+    private fun newJar(): CookieHandler = if (DesktopBrowserPlatform.usesWebView2) {
+        java.net.CookieManager(null, java.net.CookiePolicy.ACCEPT_ALL)
+    } else com.sun.webkit.network.CookieManager()
 
     fun install() = setDefault(this)
 
     fun reset() {
-        jar = com.sun.webkit.network.CookieManager()
+        jar = newJar()
     }
 
     override fun get(uri: URI, requestHeaders: Map<String, List<String>>): Map<String, List<String>> =

@@ -36,7 +36,13 @@ class DesktopRangeStreamTest {
             }
             val from = match.groupValues[1].toInt()
             val to = minOf(match.groupValues[2].toInt(), body.size - 1)
-            if (to - from + 1 > allowance || from >= body.size) {
+            if (from >= body.size) {
+                exchange.responseHeaders.add("Content-Range", "bytes */${body.size}")
+                exchange.sendResponseHeaders(416, -1)
+                exchange.close()
+                return@createContext
+            }
+            if (to - from + 1 > allowance) {
                 exchange.sendResponseHeaders(403, -1)
                 exchange.close()
                 return@createContext
