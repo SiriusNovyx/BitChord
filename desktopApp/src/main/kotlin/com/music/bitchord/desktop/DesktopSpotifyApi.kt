@@ -108,9 +108,10 @@ internal class SpotifyApi(private val fixtureBase: URI? = null, private val clie
 
     suspend fun profile(accessToken: String): SpotifyProfile {
         val body = get("me", accessToken)
-        val identity = body.text("account_id")?.takeIf(String::isNotBlank) ?: throw SpotifyApiException(502)
+        val username = body.text("id")?.takeIf { it.isNotBlank() && it.length <= 256 && it.none(Char::isISOControl) }
+        val identity = body.text("account_id")?.takeIf(String::isNotBlank) ?: username ?: throw SpotifyApiException(502)
         return SpotifyProfile(identity, body.text("display_name")?.takeIf(String::isNotBlank) ?: "Spotify listener",
-            body.text("product"), body.text("id")?.takeIf { it.isNotBlank() && it.length <= 256 && it.none(Char::isISOControl) })
+            body.text("product"), username)
     }
 
     suspend fun get(path: String, accessToken: String): JsonObject {

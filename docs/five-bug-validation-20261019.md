@@ -53,8 +53,8 @@ Desktop application bytecode stays at Java 21; shared modules stay at Java 17.
 |---|---|
 | Shared JVM tests | 58 passed |
 | Shared UI JVM tests | 46 passed |
-| Desktop tests, native ARM64 Java 21 | 465 passed |
-| Desktop tests, native ARM64 Java 25 | 465 passed |
+| Desktop tests, native ARM64 Java 21 | 468 passed |
+| Desktop tests, native ARM64 Java 25 | 468 passed |
 | Android Dev debug unit tests | 999 passed |
 | Windows x64 production Kotlin compilation | Passed; fresh x64 execution not tested |
 | Backend tests and vet | Passed in the import batch |
@@ -83,7 +83,7 @@ reported session error.
 The existing validation ZIP/APK predate the subsequent shutdown ownership fix;
 their manifests and hashes remain preserved. They must not be described as
 containing that follow-up. The two shutdown regressions failed before the fix;
-the 465-test desktop runs above include them after the fix.
+the 468-test desktop runs above include them after the fix.
 
 ## Remaining acceptance checks
 
@@ -114,3 +114,21 @@ Use the existing ARM64 native preparation described in
 Select verified ARM64 JDKs explicitly when multiple architectures are installed.
 The build JVM and packaged runtime are independent; using Java 25 for Gradle
 does not require Java 25 application bytecode.
+
+## Spotify profile compatibility follow-up
+
+The `/v1/me` parser now accepts responses containing only `id`, including
+responses where `account_id` is null or blank. It preserves a nonblank
+`account_id` when supplied, following the current
+[Spotify profile reference](https://developer.spotify.com/documentation/web-api/reference/get-current-users-profile),
+and keeps the validated `id` as the native playback username. Responses
+with neither usable identity still fail explicitly. Protected grant
+storage, account matching and token refresh are unchanged.
+
+Two new HTTP cases reproduced 502 failures before the fix. All 34 Spotify
+tests pass after the fix, and the full desktop suite now passes 468 tests
+on each of native ARM64 Java 21 and Java 25. Windows x64 production Kotlin
+compilation passed. Three added API tests cover id-only profiles, blank
+account_id fallback and missing-identity rejection; the existing dual-field
+test retains documented account_id precedence. No saved account data was
+read or changed, and a new live OAuth sign-in has not been retested.

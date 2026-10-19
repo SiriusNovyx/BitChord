@@ -50,13 +50,47 @@ class DesktopSpotifyApiTest {
         } }
     }
 
-    @Test fun `profile requires stable account identity and keeps unknown subscription unknown`() {
+    @Test fun `profile prefers account identity when present and keeps unknown subscription unknown`() {
         fixture({ respond(it, 200, """{"account_id":"stable-account","id":"mutable-name","display_name":"Listener"}""") }) { api -> runBlocking {
             val profile = api.profile("access")
             assertEquals("stable-account", profile.accountId)
             assertEquals("mutable-name", profile.playbackUsername)
             assertEquals(null, profile.product)
         } }
+    }
+
+    @Test fun `profile accepts the current user response with id and no account_id`() {
+        fixture({ exchange ->
+            assertEquals("/v1/me", exchange.requestURI.path)
+            assertEquals("Bearer access", exchange.requestHeaders.getFirst("Authorization"))
+            respond(exchange, 200, """{"id":"spotify-user-123","display_name":"Listener","product":"premium","type":"user","images":[],"external_urls":{"spotify":"https://open.spotify.com/user/spotify-user-123"}}""")
+        }) { api -> runBlocking {
+            val profile = api.profile("access")
+            assertEquals("spotify-user-123", profile.accountId)
+            assertEquals("spotify-user-123", profile.playbackUsername)
+            assertEquals("Listener", profile.displayName)
+            assertEquals("premium", profile.product)
+        } }
+    }
+
+    @Test fun `profile falls back to id when account_id is null or blank`() {
+        for (account in listOf("null", "\"\"", "\"  \"")) {
+            fixture({ respond(it, 200, """{"account_id":$account,"id":"spotify-user-123","display_name":null}""") }) { api -> runBlocking {
+                val profile = api.profile("access")
+                assertEquals("spotify-user-123", profile.accountId)
+                assertEquals("spotify-user-123", profile.playbackUsername)
+                assertEquals("Spotify listener", profile.displayName)
+            } }
+        }
+    }
+
+    @Test fun `profile rejects responses without a usable account identity`() {
+        for (body in listOf("{}", """{"display_name":"Listener"}""", """{"account_id":" ","id":""}""")) {
+            fixture({ respond(it, 200, body) }) { api -> runBlocking {
+                val failure = assertFailsWith<SpotifyApiException> { api.profile("access") }
+                assertEquals(502, failure.status)
+            } }
+        }
     }
 
     @Test fun `refresh preserves protected account binding`() {
