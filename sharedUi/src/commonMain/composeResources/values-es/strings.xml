@@ -200,4 +200,10 @@
     <string name="search_library_empty">Busca las canciones de tu carpeta de Música local.</string>
     <string name="search_library_hint">Canciones, artistas y álbumes</string>
     <string name="search_library_no_results">Nada en Música local coincide con “%1$s”.</string>
+    <string name="analysis_absent">ninguna</string>
+    <string name="analysis_source_pending">fuente pendiente</string>
+    <string name="analysis_unsupported_video">vídeo no compatible</string>
+    <string name="analysis_unsupported_source">fuente no compatible</string>
+    <string name="analysis_no_source">sin fuente para analizar</string>
+    <string name="analysis_unavailable">analizador no disponible</string>
 </resources>

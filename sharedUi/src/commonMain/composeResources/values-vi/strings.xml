@@ -200,4 +200,10 @@
     <string name="search_library_empty">Tìm các bài hát trong thư mục Nhạc cục bộ của bạn.</string>
     <string name="search_library_hint">Bài hát, nghệ sĩ và album</string>
     <string name="search_library_no_results">Không có gì trong Nhạc cục bộ khớp với “%1$s”.</string>
+    <string name="analysis_absent">không có bài hát</string>
+    <string name="analysis_source_pending">đang chờ nguồn</string>
+    <string name="analysis_unsupported_video">video không được hỗ trợ</string>
+    <string name="analysis_unsupported_source">nguồn không được hỗ trợ</string>
+    <string name="analysis_no_source">không có nguồn để phân tích</string>
+    <string name="analysis_unavailable">bộ phân tích không khả dụng</string>
 </resources>

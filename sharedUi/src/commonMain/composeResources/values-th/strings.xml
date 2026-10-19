@@ -200,4 +200,10 @@
     <string name="search_library_empty">ค้นหาเพลงในโฟลเดอร์เพลงในเครื่องของคุณ</string>
     <string name="search_library_hint">เพลง ศิลปิน และอัลบั้ม</string>
     <string name="search_library_no_results">ไม่มีอะไรในเพลงในเครื่องตรงกับ “%1$s”</string>
+    <string name="analysis_absent">ไม่มีเพลง</string>
+    <string name="analysis_source_pending">รอแหล่งเสียงสำหรับวิเคราะห์</string>
+    <string name="analysis_unsupported_video">ไม่รองรับวิดีโอ</string>
+    <string name="analysis_unsupported_source">ไม่รองรับแหล่งเสียงนี้</string>
+    <string name="analysis_no_source">ไม่มีแหล่งเสียงสำหรับวิเคราะห์</string>
+    <string name="analysis_unavailable">ตัววิเคราะห์ไม่พร้อมใช้งาน</string>
 </resources>

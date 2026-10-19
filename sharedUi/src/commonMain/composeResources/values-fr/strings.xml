@@ -200,4 +200,10 @@
     <string name="search_library_empty">Recherche les titres de votre dossier Musique locale.</string>
     <string name="search_library_hint">Titres, artistes et albums</string>
     <string name="search_library_no_results">Rien dans Musique locale ne correspond à « %1$s ».</string>
+    <string name="analysis_absent">aucun titre</string>
+    <string name="analysis_source_pending">source en attente</string>
+    <string name="analysis_unsupported_video">vidéo non prise en charge</string>
+    <string name="analysis_unsupported_source">source non prise en charge</string>
+    <string name="analysis_no_source">aucune source analysable</string>
+    <string name="analysis_unavailable">analyseur indisponible</string>
 </resources>

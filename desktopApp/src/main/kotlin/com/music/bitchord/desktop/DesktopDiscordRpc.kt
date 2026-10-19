@@ -8,7 +8,6 @@ import com.my.kizzy.rpc.UserInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.json.buildJsonObject
@@ -50,27 +49,21 @@ internal object DesktopDiscordRpc {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var rpc: KizzyRPC? = null
-    private var ipc: DesktopDiscordIpc? = null
-    private var lastKey: String? = null
+    private data class PresenceSnapshot(
+        val state: DesktopPlaybackState,
+        val speed: Float,
+        val nowMs: Long,
+        val startMs: Long,
+        val endMs: Long,
+        val title: String,
+    )
 
+    private val snapshotLock = Any()
+    private var latest: PresenceSnapshot? = null
     private val _localClient = MutableStateFlow(false)
-
-    /** Whether a Discord on this machine is answering, so no token is needed. */
     val localClient: StateFlow<Boolean> = _localClient
 
-    /** Looks for a local Discord. Cheap, and the answer changes when one starts. */
-    fun refreshLocalClient() {
-        scope.launch {
-            val found = DesktopDiscordIpc.connect(APPLICATION_ID)
-            if (found != null) {
-                ipc?.close()
-                ipc = found
-                _localClient.value = true
-            } else {
-                _localClient.value = ipc != null
-            }
-        }
-    }
+    fun refreshLocalClient() = session.probe()
 
     private val _username = MutableStateFlow(DesktopPersistence().string(KEY_USERNAME, ""))
 
@@ -83,6 +76,18 @@ internal object DesktopDiscordRpc {
     private val _token = MutableStateFlow(DesktopPersistence().string(KEY_TOKEN, ""))
     val token: StateFlow<String> = _token
 
+    private val session = DesktopDiscordSession(
+        scope = scope,
+        connect = { DesktopDiscordIpc.connect(APPLICATION_ID) },
+        onAvailabilityChanged = { available ->
+            _localClient.value = available
+        },
+        onSessionStopped = ::closeGateway,
+        onLocalActivityPublished = ::closeGateway,
+    )
+
+    init { session.setEnabled(_enabled.value) }
+
     /** Checks a token by asking Discord who it belongs to, then keeps it. */
     suspend fun signIn(candidate: String): Result<UserInfo> =
         KizzyRPC.getUserInfo(candidate, USER_AGENT, superProperties())
@@ -92,6 +97,7 @@ internal object DesktopDiscordRpc {
                 _token.value = candidate
                 _username.value = user.name
                 setEnabled(true)
+                session.restart()
             }
 
     fun signOut() {
@@ -105,105 +111,101 @@ internal object DesktopDiscordRpc {
     fun setEnabled(value: Boolean) {
         DesktopPersistence().saveBoolean(KEY_ENABLED, value)
         _enabled.value = value
-        if (!value) clear()
+        session.setEnabled(value)
     }
 
-    /**
-     * Pushes the current track, or takes the presence down.
-     *
-     * Discord counts the progress bar down on its own clock from the start and
-     * end instants, so a presence set once stays correct for the rest of the
-     * track and only a real change is worth sending — which is what [lastKey]
-     * decides. Playback speed is divided out of both instants: at 1.5x the
-     * wall-clock time left is not the media time left, and a presence that
-     * ignored that would finish its countdown mid-song.
-     */
-    fun onPlaybackStateChanged(state: DesktopPlaybackState, speed: Float) {
-        if (!_enabled.value) return
-        if (_token.value.isBlank() && ipc == null) return
+    fun onPlaybackStateChanged(state: DesktopPlaybackState, speed: Float) = synchronized(snapshotLock) {
         val song = state.song
-        if (song == null || !state.isPlaying) {
+        if (song == null) {
             clear()
+            return@synchronized
+        }
+        val rate = speed.takeIf { it.isFinite() && it > 0f } ?: 1f
+        val now = System.currentTimeMillis()
+        val duration = state.durationMs.coerceAtLeast(0L)
+        val snapshot = PresenceSnapshot(
+            state, rate, now,
+            now - (state.positionMs / rate).toLong(),
+            now + ((duration - state.positionMs).coerceAtLeast(0L) / rate).toLong(),
+            if (rate == 1f) song.title else "${song.title} [${String.format(Locale.ROOT, "%.2fx", rate)}]",
+        )
+        latest = snapshot
+        publish(snapshot)
+    }
+
+    /** Display changes retain the original clock anchor; they do not rewind the song. */
+    fun refreshActivity() = synchronized(snapshotLock) {
+        latest?.let(::publish)
+    }
+
+    private fun publish(snapshot: PresenceSnapshot) {
+        val song = snapshot.state.song ?: return
+        if (!snapshot.state.isPlaying || snapshot.state.awaitingAudio) {
+            session.update(null) { closeGateway() }
             return
         }
-        val key = discordPlaybackRevision(state, speed)
-        if (key == lastKey) return
-        lastKey = key
-        val position = state.positionMs
-        val duration = state.durationMs.takeIf { it > 0 } ?: 0L
-        scope.launch {
-            val now = System.currentTimeMillis()
-            val elapsed = (position / speed).toLong()
-            val remaining = ((duration - position).coerceAtLeast(0L) / speed).toLong()
-            val title = if (speed != 1.0f) {
-                "${song.title} [${String.format(Locale.ROOT, "%.2fx", speed)}]"
-            } else {
-                song.title
-            }
-            // The socket first, and the gateway only if there is no socket:
-            // publishing through both would put the same presence up twice.
-            val local = ipc
-            if (local != null) {
-                val sent = runCatching {
-                    local.setActivity(ipcActivity(song, title, now - elapsed, now + remaining))
-                }.isSuccess
-                if (sent) return@launch
-                // A client that has quit takes its socket with it.
-                ipc = null
-                _localClient.value = false
-            }
-            if (_token.value.isBlank()) return@launch
-            runCatching {
-                val client = rpc ?: KizzyRPC(
-                    token = _token.value,
-                    os = if (DesktopPlatform.isWindows) "Windows" else "Linux",
-                    browser = "Discord Client",
-                    device = "desktop",
-                    userAgent = USER_AGENT,
-                    superPropertiesBase64 = superProperties(),
-                ).also { rpc = it }
-
-                client.setActivity(
-                    name = DesktopDiscordSettings.activityName.value
-                        .ifBlank { DesktopDiscordSettings.APP_NAME },
-                    details = title,
-                    state = song.artist,
-                    detailsUrl = watchUrl(song),
-                    // Never null: an activity with no large image falls back to
-                    // whatever icon the application id points at, which is not
-                    // ours to set.
-                    largeImage = RpcImage.ExternalImage(
-                        song.artworkAt(ART_PX)?.takeIf { it.startsWith("http") } ?: FALLBACK_ART_URL,
-                    ),
-                    smallImage = null,
-                    largeText = song.albumName,
-                    buttons = buttonLabels(song).takeIf { it.isNotEmpty() },
-                    type = when (DesktopDiscordSettings.activityType.value) {
-                        "playing" -> KizzyRPC.Type.PLAYING
-                        "watching" -> KizzyRPC.Type.WATCHING
-                        "competing" -> KizzyRPC.Type.COMPETING
-                        else -> KizzyRPC.Type.LISTENING
-                    },
-                    statusDisplayType = if (DesktopDiscordSettings.useDetails.value) {
-                        KizzyRPC.StatusDisplayType.DETAILS
-                    } else {
-                        KizzyRPC.StatusDisplayType.STATE
-                    },
-                    since = now,
-                    startTime = now - elapsed,
-                    endTime = now + remaining,
-                    applicationId = APPLICATION_ID,
-                    status = DesktopDiscordSettings.status.value,
-                )
-            }
-        }
+        val activity = ipcActivity(song, snapshot.title, snapshot.startMs, snapshot.endMs)
+        session.update(activity) { sendGateway(snapshot) }
     }
 
-    fun clear() {
-        lastKey = null
-        runCatching { ipc?.setActivity(null) }
-        rpc?.closeRPC()
+    fun clear() = synchronized(snapshotLock) {
+        latest = null
+        session.update(null) { closeGateway() }
+    }
+
+    private fun closeGateway() {
+        runCatching { rpc?.closeRPC() }
         rpc = null
+    }
+
+    private suspend fun sendGateway(snapshot: PresenceSnapshot) {
+        if (_token.value.isBlank()) return
+        val song = snapshot.state.song ?: return
+        val title = snapshot.title
+        val now = snapshot.nowMs
+        val elapsed = now - snapshot.startMs
+        val remaining = snapshot.endMs - now
+        val client = rpc ?: KizzyRPC(
+            token = _token.value,
+            os = if (DesktopPlatform.isWindows) "Windows" else "Linux",
+            browser = "Discord Client",
+            device = "desktop",
+            userAgent = USER_AGENT,
+            superPropertiesBase64 = superProperties(),
+        ).also { rpc = it }
+
+        client.setActivity(
+            name = DesktopDiscordSettings.activityName.value
+                .ifBlank { DesktopDiscordSettings.APP_NAME },
+            details = title,
+            state = song.artist,
+            detailsUrl = watchUrl(song),
+            // Never null: an activity with no large image falls back to
+            // whatever icon the application id points at, which is not
+            // ours to set.
+            largeImage = RpcImage.ExternalImage(
+                song.artworkAt(ART_PX)?.takeIf { it.startsWith("http") } ?: FALLBACK_ART_URL,
+            ),
+            smallImage = null,
+            largeText = song.albumName,
+            buttons = buttonLabels(song).takeIf { it.isNotEmpty() },
+            type = when (DesktopDiscordSettings.activityType.value) {
+                "playing" -> KizzyRPC.Type.PLAYING
+                "watching" -> KizzyRPC.Type.WATCHING
+                "competing" -> KizzyRPC.Type.COMPETING
+                else -> KizzyRPC.Type.LISTENING
+            },
+            statusDisplayType = if (DesktopDiscordSettings.useDetails.value) {
+                KizzyRPC.StatusDisplayType.DETAILS
+            } else {
+                KizzyRPC.StatusDisplayType.STATE
+            },
+            since = now,
+            startTime = now - elapsed,
+            endTime = now + remaining,
+            applicationId = APPLICATION_ID,
+            status = DesktopDiscordSettings.status.value,
+        )
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.music.bitchord.ui.player
 
+import com.music.bitchord.data.settings.LyricsDisplayMode
+
 import android.content.Context
 import android.database.ContentObserver
 import android.media.AudioFormat
@@ -75,10 +77,12 @@ class AndroidPlayerHost(context: Context) : PlayerHost {
         override val spotifyCanvasAutoHide get() = AppSettings.spotifyCanvasAutoHide
         override val syncedLyrics get() = AppSettings.syncedLyrics
         override val translationLanguage get() = AppSettings.translationLanguage
+        override val lyricsDisplayMode get() = AppSettings.lyricsDisplayMode
         override val versionAlignmentInProgress get() = AppSettings.versionAlignmentInProgress
 
         override fun setLastPlayerScreen(value: LastPlayerScreen) = AppSettings.setLastPlayerScreen(value)
         override fun setLyricsOffsetMs(value: Int) = AppSettings.setLyricsOffsetMs(value)
+        override fun setLyricsDisplayMode(value: LyricsDisplayMode) = AppSettings.setLyricsDisplayMode(value)
     }
 
     override fun cachedCanvas(song: Song): CanvasArtwork? = CanvasRepository.cached(song)

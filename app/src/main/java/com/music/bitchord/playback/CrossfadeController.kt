@@ -14,6 +14,8 @@ import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.MixBlend
 import com.music.bitchord.data.settings.SmartAnalysis
 import com.music.bitchord.data.settings.TrackAnalysisState
+import com.music.bitchord.data.settings.TrackAnalysisEligibility
+import com.music.bitchord.data.settings.TrackAnalysisStatus
 import com.music.bitchord.data.settings.TransitionWindow
 import com.music.bitchord.playback.smart.CrossfadeMode
 import com.music.bitchord.playback.smart.FILTER_ECHO_AT
@@ -152,7 +154,7 @@ class CrossfadeController(
      * Whether a decode and inference for a media item is running right now.
      * Only feeds the stats line — nothing about a transition waits on it.
      */
-    private val analysisRunningFor: (MediaItem) -> Boolean = { false },
+    private val analysisStatusFor: (MediaItem) -> TrackAnalysisStatus = { TrackAnalysisStatus(TrackAnalysisEligibility.UNKNOWN) },
     /**
      * The track about to be loaded onto the standby player, announced at the
      * moment [begin] arms rather than at the handoff.
@@ -960,8 +962,8 @@ class CrossfadeController(
         val markable = !plan.blocked &&
             plan.markerVisible &&
             duration > 0L &&
-            analysisState.current == TrackAnalysisState.ANALYSED &&
-            analysisState.next in MEASURED_ENOUGH_TO_ENTER_ON
+            analysisState.current.isMeasured && analysisState.current.state == TrackAnalysisState.ANALYSED &&
+            analysisState.next.isMeasured
         AppSettings.smartTransitionWindow.value = if (markable) {
             TransitionWindow(
                 start = (plan.transitionStart * 1000.0 / duration).toFloat().coerceIn(0f, 1f),
@@ -1062,37 +1064,14 @@ class CrossfadeController(
         val nextIndex = player.nextMediaItemIndex
         val nextItem = if (nextIndex == C.INDEX_UNSET) null else player.getMediaItemAt(nextIndex)
         AppSettings.smartAnalysis.value = SmartAnalysis(
-            current = currentItem?.let { stateOf(it, analysisFor(it)) } ?: TrackAnalysisState.WAITING,
-            next = nextItem?.let { stateOf(it, analysisFor(it)) } ?: TrackAnalysisState.WAITING,
+            current = currentItem?.let(::statusOf) ?: TrackAnalysisStatus(),
+            next = nextItem?.let(::statusOf) ?: TrackAnalysisStatus(),
         )
     }
 
-    /**
-     * Where one track stands, for the stats line. "Analysing" is asked for
-     * first because a track can be in flight while a superseded provisional
-     * result is already on record, and the work in progress is the more useful
-     * thing to say about it.
-     */
-    private fun stateOf(item: MediaItem, analysis: TrackAnalysis): TrackAnalysisState = when {
-        // Usable first, and a pass in flight *second*. The other order was
-        // right up to the point a head-only result started arriving before the
-        // whole-track one: a track measured off its opening reads as analysed,
-        // then finishes caching, then has the full pass run over it to replace
-        // the provisional numbers — and reported "analysing" again throughout.
-        // Going backwards from analysed reads as something having broken, when
-        // what is happening is a better answer being computed. Confidence on one
-        // such track went 0.39 to 0.94 and its cue moved from 0.1s to 9.5s.
-        analysis.isUsable ->
-            if (analysisRunningFor(item)) TrackAnalysisState.REFINING else TrackAnalysisState.ANALYSED
-        analysisRunningFor(item) -> TrackAnalysisState.ANALYSING
-        // A recorded-but-unusable result is the analyzer's way of saying it
-        // tried and got nothing, and that it will not try again — it writes a
-        // ready-but-empty entry precisely so the track stops being retried. A
-        // track nothing has looked at yet has no status at all, which is the
-        // only case that is still merely waiting.
-        analysis.status == TrackAnalysis.STATUS_READY -> TrackAnalysisState.FAILED
-        else -> TrackAnalysisState.WAITING
-    }
+    private fun statusOf(item: MediaItem): TrackAnalysisStatus =
+        if (item.isVideoOrigin) TrackAnalysisStatus(TrackAnalysisEligibility.VIDEO)
+        else analysisStatusFor(item)
 
     /**
      * The next queue item's own duration.

@@ -200,4 +200,10 @@
     <string name="search_library_empty">Durchsuche die Songs in deinem Ordner für lokale Musik.</string>
     <string name="search_library_hint">Songs, Künstler und Alben</string>
     <string name="search_library_no_results">Nichts in der lokalen Musik passt zu „%1$s“.</string>
+    <string name="analysis_absent">kein Titel</string>
+    <string name="analysis_source_pending">Quelle ausstehend</string>
+    <string name="analysis_unsupported_video">Video nicht unterstützt</string>
+    <string name="analysis_unsupported_source">Quelle nicht unterstützt</string>
+    <string name="analysis_no_source">keine Analysequelle</string>
+    <string name="analysis_unavailable">Analyse nicht verfügbar</string>
 </resources>

@@ -200,4 +200,10 @@
     <string name="search_library_empty">מחפש את השירים בתיקיית המוזיקה המקומית שלכם.</string>
     <string name="search_library_hint">שירים, אמנים ואלבומים</string>
     <string name="search_library_no_results">אין דבר במוזיקה המקומית שתואם ל-„%1$s”.</string>
+    <string name="analysis_absent">אין שיר</string>
+    <string name="analysis_source_pending">ממתין למקור</string>
+    <string name="analysis_unsupported_video">וידאו לא נתמך</string>
+    <string name="analysis_unsupported_source">מקור לא נתמך</string>
+    <string name="analysis_no_source">אין מקור לניתוח</string>
+    <string name="analysis_unavailable">המנתח אינו זמין</string>
 </resources>

@@ -200,4 +200,10 @@
     <string name="search_library_empty">搜索本地音乐文件夹中的歌曲。</string>
     <string name="search_library_hint">歌曲、艺人和专辑</string>
     <string name="search_library_no_results">本地音乐中没有与「%1$s」匹配的内容。</string>
+    <string name="analysis_absent">无歌曲</string>
+    <string name="analysis_source_pending">等待音源</string>
+    <string name="analysis_unsupported_video">不支持此视频</string>
+    <string name="analysis_unsupported_source">不支持此音源</string>
+    <string name="analysis_no_source">无可分析的音源</string>
+    <string name="analysis_unavailable">分析器不可用</string>
 </resources>

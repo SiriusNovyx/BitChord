@@ -114,11 +114,17 @@ internal object DesktopSourceRegistry {
     }
 
     /** YouTube Music's copies of [song], most confident first, found by title and artist. */
-    private suspend fun youTubeMatches(song: Song): List<Song> {
+    private suspend fun youTubeMatches(song: Song, failOnError: Boolean = false): List<Song> {
         if (song.title.isBlank() || song.isVideo) return emptyList()
-        for (query in DesktopTrackMatcher.queries(song)) {
-            val candidates = DesktopSearchClient.search(query, SearchFilter.SONGS)
-                .getOrDefault(emptyList())
+        val queries = DesktopTrackMatcher.queries(song)
+        if (failOnError) return com.music.bitchord.playback.smart.findAnalysisSource(queries) { query ->
+            val candidates = DesktopSearchClient.search(query, SearchFilter.SONGS).getOrThrow()
+                .mapNotNull { (it as? SearchResult.Track)?.song }
+            DesktopTrackMatcher.ranked(candidates, song).ifEmpty { null }
+        }.orEmpty()
+        for (query in queries) {
+            val search = DesktopSearchClient.search(query, SearchFilter.SONGS)
+            val candidates = search.getOrDefault(emptyList())
                 .mapNotNull { (it as? SearchResult.Track)?.song }
             DesktopTrackMatcher.ranked(candidates, song).ifEmpty { null }?.let { return it }
         }
@@ -135,7 +141,7 @@ internal object DesktopSourceRegistry {
         // A row picked from the Addons search is that addon's or nothing — no YouTube search and
         // Opus fetch behind it just to measure it. Left unmeasured, as in a party.
         DesktopAddonSource.parseTrack(song.videoId) != null -> null
-        else -> youTubeMatches(song).firstOrNull()
+        else -> youTubeMatches(song, failOnError = true).firstOrNull()
     }
 
     /**

@@ -300,7 +300,6 @@ import com.music.bitchord.data.model.withoutRepeatsOf
 import com.music.bitchord.data.settings.AutomixPerformanceMode
 import com.music.bitchord.data.settings.LastPlayerScreen
 import com.music.bitchord.data.settings.SmartAnalysis
-import com.music.bitchord.data.settings.TrackAnalysisState
 import com.music.bitchord.data.settings.TransitionWindow
 import com.music.bitchord.ui.icons.BitChordIcons
 import dev.chrisbanes.haze.HazeState
@@ -7170,15 +7169,6 @@ private fun AutomixPerformanceMode.detail(): String = when (this) {
         "2 threads · recommended balance of speed, heat and battery"
     AutomixPerformanceMode.PERFORMANCE ->
         "4 threads · fastest analysis · higher heat and battery use"
-}
-
-/** Android's wording for the Automix line, so both players read alike. */
-private fun TrackAnalysisState.label(): String = when (this) {
-    TrackAnalysisState.ANALYSED -> "analysed"
-    TrackAnalysisState.REFINING -> "analysed, refining…"
-    TrackAnalysisState.ANALYSING -> "analysing…"
-    TrackAnalysisState.WAITING -> "waiting"
-    TrackAnalysisState.FAILED -> "failed"
 }
 
 @Composable

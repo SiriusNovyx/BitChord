@@ -106,6 +106,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.music.bitchord.data.NerdStats
 import com.music.bitchord.data.listentogether.PartyMember
 import com.music.bitchord.data.settings.TrackAnalysisState
+import com.music.bitchord.data.settings.TrackAnalysisEligibility
+import com.music.bitchord.data.settings.TrackAnalysisStatus
 import com.music.bitchord.data.settings.AudioQuality
 import com.music.bitchord.data.model.Song
 import java.util.Locale
@@ -371,13 +373,7 @@ internal fun SleeveNerdStats(song: Song, modifier: Modifier = Modifier) {
                 // reads the same way every time and the eye can find the half
                 // it wants without re-parsing the sentence.
                 text = when {
-                    // Ahead of the video case because it is the broader one:
-                    // in a party nothing is analysed for any song, video or
-                    // not, so naming the video limitation there would describe
-                    // a rule that is not the one in force.
                     inParty -> stringResource(Res.string.automix_stopped_in_party)
-                    song.isVideoOrigin ->
-                        stringResource(Res.string.automix_not_supported_video)
                     else -> stringResource(
                         Res.string.automix_analysis_status,
                         smartAnalysis.current.localizedLabel(),
@@ -1745,12 +1741,20 @@ private fun codecLabel(mimeType: String?): String? = when {
     else -> mimeType.substringAfter('/').uppercase(Locale.ROOT)
 }
 
-/** Wording for the stats line; see [TrackAnalysisState]. */
 @Composable
-private fun TrackAnalysisState.localizedLabel(): String = when (this) {
-    TrackAnalysisState.ANALYSED -> stringResource(Res.string.analysis_complete)
-    TrackAnalysisState.REFINING -> stringResource(Res.string.analysis_refining)
-    TrackAnalysisState.ANALYSING -> stringResource(Res.string.analysis_in_progress)
-    TrackAnalysisState.WAITING -> stringResource(Res.string.waiting)
-    TrackAnalysisState.FAILED -> stringResource(Res.string.failed)
+private fun TrackAnalysisStatus.localizedLabel(): String = when (eligibility) {
+    TrackAnalysisEligibility.ABSENT -> stringResource(Res.string.analysis_absent)
+    TrackAnalysisEligibility.VIDEO -> stringResource(Res.string.analysis_unsupported_video)
+    TrackAnalysisEligibility.SOURCE_POLICY -> stringResource(Res.string.analysis_unsupported_source)
+    TrackAnalysisEligibility.NO_SOURCE -> stringResource(Res.string.analysis_no_source)
+    TrackAnalysisEligibility.ANALYSER_UNAVAILABLE -> stringResource(Res.string.analysis_unavailable)
+    TrackAnalysisEligibility.UNKNOWN -> if (state == TrackAnalysisState.FAILED) stringResource(Res.string.failed)
+        else stringResource(Res.string.analysis_source_pending)
+    TrackAnalysisEligibility.ELIGIBLE -> when (state) {
+        TrackAnalysisState.ANALYSED -> stringResource(Res.string.analysis_complete)
+        TrackAnalysisState.REFINING -> stringResource(Res.string.analysis_refining)
+        TrackAnalysisState.ANALYSING -> stringResource(Res.string.analysis_in_progress)
+        TrackAnalysisState.WAITING -> stringResource(Res.string.waiting)
+        TrackAnalysisState.FAILED -> stringResource(Res.string.failed)
+    }
 }

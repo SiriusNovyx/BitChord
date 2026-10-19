@@ -200,4 +200,10 @@
     <string name="search_library_empty">Cari lagu di folder Musik Lokal Anda.</string>
     <string name="search_library_hint">Lagu, Artis, dan Album</string>
     <string name="search_library_no_results">Tidak ada di Musik Lokal yang cocok dengan “%1$s”.</string>
+    <string name="analysis_absent">tidak ada lagu</string>
+    <string name="analysis_source_pending">menunggu sumber</string>
+    <string name="analysis_unsupported_video">video tidak didukung</string>
+    <string name="analysis_unsupported_source">sumber tidak didukung</string>
+    <string name="analysis_no_source">tidak ada sumber analisis</string>
+    <string name="analysis_unavailable">penganalisis tidak tersedia</string>
 </resources>

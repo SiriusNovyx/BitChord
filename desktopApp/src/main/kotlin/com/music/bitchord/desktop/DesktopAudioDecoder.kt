@@ -3,6 +3,10 @@ package com.music.bitchord.desktop
 import org.bytedeco.ffmpeg.avcodec.AVCodecContext
 import org.bytedeco.ffmpeg.avcodec.AVPacket
 import org.bytedeco.ffmpeg.avformat.AVFormatContext
+import org.bytedeco.ffmpeg.avformat.AVIOInterruptCB
+import java.io.IOException
+import java.io.InterruptedIOException
+import java.util.concurrent.atomic.AtomicBoolean
 import org.bytedeco.ffmpeg.avformat.AVInputFormat
 import org.bytedeco.ffmpeg.avutil.AVChannelLayout
 import org.bytedeco.ffmpeg.avutil.AVDictionary
@@ -39,6 +43,7 @@ import org.bytedeco.ffmpeg.global.avutil.AV_SAMPLE_FMT_S32
 import org.bytedeco.ffmpeg.global.avutil.av_channel_layout_default
 import org.bytedeco.ffmpeg.global.avutil.av_dict_get
 import org.bytedeco.ffmpeg.global.avutil.av_dict_set
+import org.bytedeco.ffmpeg.global.avutil.av_dict_free
 import org.bytedeco.ffmpeg.global.avutil.av_frame_alloc
 import org.bytedeco.ffmpeg.global.avutil.av_get_bytes_per_sample
 import org.bytedeco.ffmpeg.global.avutil.av_strerror
@@ -100,10 +105,24 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
     private var drained = false
 
     /** Live only while this decoder reads through windowed HTTP; see [open]. */
-    private var rangeSource: DesktopRangeStream? = null
+    @Volatile private var rangeSource: DesktopRangeStream? = null
     private var avio: AVIOContext? = null
     private var readPacket: Read_packet_Pointer_BytePointer_int? = null
     private var seekPacket: Seek_Pointer_long_int? = null
+    private val cancelled = AtomicBoolean(false)
+    @Volatile private var ioFailure: Exception? = null
+    private var interruptCallback: AVIOInterruptCB.Callback_Pointer? = null
+
+    override fun cancelPendingRead() {
+        cancelled.set(true)
+        rangeSource?.cancelPendingRead()
+    }
+
+    override fun prepareSeek() {
+        cancelled.set(false)
+        rangeSource?.resumeAfterCancellation()
+        ioFailure = null
+    }
 
     /** The format samples arrive in, once [open] has succeeded. */
     var outputFormat: DesktopPcmFormat = DesktopPcmFormat(44_100, 2, 2)
@@ -156,19 +175,32 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
         av_dict_set(options, "reconnect_streamed", "1", 0)
         av_dict_set(options, "reconnect_on_network_error", "1", 0)
         av_dict_set(options, "reconnect_delay_max", "5", 0)
+        av_dict_set(options, "reconnect_max_retries", "2", 0)
+        av_dict_set(options, "reconnect_delay_total_max", "10", 0)
         av_dict_set(options, "rw_timeout", "15000000", 0)
 
-        val opened = if (windowed) windowedContext(url, headers) else AVFormatContext(null)
+        val opened = if (windowed) windowedContext(url, headers) else avformat_alloc_context()
+        val interrupt = object : AVIOInterruptCB.Callback_Pointer() {
+            override fun call(opaque: Pointer?): Int =
+                if (cancelled.get() || Thread.currentThread().isInterrupted) 1 else 0
+        }
+        interruptCallback = interrupt
+        opened.interrupt_callback().callback(interrupt)
+        format = opened
         // The code matters.
         val inputFormat: AVInputFormat? = when (transport?.lowercase()) {
             DesktopAddonStream.HLS -> av_find_input_format("hls")
             DesktopAddonStream.DASH -> av_find_input_format("dash")
             else -> null
         }
-        val status = avformat_open_input(opened, if (windowed) null as String? else url, inputFormat, options)
-        check(status >= 0) { "could not open stream (${describe(status)})" }
-        format = opened
-        check(avformat_find_stream_info(opened, null as AVDictionary?) >= 0) { "no stream info" }
+        val status = try {
+            avformat_open_input(opened, if (windowed) null as String? else url, inputFormat, options)
+        } finally { av_dict_free(options) }
+        ioFailure?.let { throw it }
+        if (status < 0) throw IOException("Could not open audio stream (${describe(status)})")
+        val infoStatus = avformat_find_stream_info(opened, null as AVDictionary?)
+        ioFailure?.let { throw it }
+        if (infoStatus < 0) throw IOException("Could not read audio stream information (${describe(infoStatus)})")
 
         streamIndex = bestRendition(opened)
             ?: av_find_best_stream(opened, AVMEDIA_TYPE_AUDIO, -1, -1, null as org.bytedeco.ffmpeg.avcodec.AVCodec?, 0)
@@ -272,8 +304,14 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
         val scratch = ByteArray(IO_BUFFER_BYTES)
         val read = object : Read_packet_Pointer_BytePointer_int() {
             override fun call(opaque: Pointer?, buffer: BytePointer?, size: Int): Int {
+                if (cancelled.get() || Thread.currentThread().isInterrupted) return -5
                 if (buffer == null) return AVERROR_EOF
-                val taken = source.read(scratch, minOf(size, scratch.size))
+                val taken = try { source.read(scratch, minOf(size, scratch.size)) }
+                catch (error: Exception) {
+                    // An exception must never unwind through a C callback. Preserve it for pump.
+                    ioFailure = error
+                    return -5 // AVERROR(EIO)
+                }
                 if (taken <= 0) return AVERROR_EOF
                 buffer.put(scratch, 0, taken)
                 return taken
@@ -381,7 +419,10 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
     private fun pump(container: AVFormatContext, pkt: AVPacket, context: AVCodecContext): Boolean {
         if (drained) return false
         val read = av_read_frame(container, pkt)
+        ioFailure?.let { throw it }
         if (read < 0) {
+            if (cancelled.get() || Thread.currentThread().isInterrupted) throw InterruptedIOException("Audio read cancelled")
+            if (read != AVERROR_EOF) throw IOException("Audio decoding interrupted (${describe(read)})")
             avcodec_send_packet(context, null as AVPacket?)
             drained = true
             return true
@@ -457,6 +498,7 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
     override fun seek(micros: Long): Boolean {
         val container = format ?: return false
         val context = codec ?: return false
+        container.pb()?.let { it.error(0); it.eof_reached(0) }
         val target = ((micros + streamStartUs) / 1_000_000.0 / streamTimeBase).toLong()
         if (av_seek_frame(container, streamIndex, target, AVSEEK_FLAG_BACKWARD) < 0) return false
         avcodec_flush_buffers(context)
@@ -494,6 +536,8 @@ internal class DesktopAudioDecoder : DesktopSampleSource {
         readPacket = null
         seekPacket = null
         rangeSource = null
+        interruptCallback?.deallocate()
+        interruptCallback = null
     }
 
     internal companion object {

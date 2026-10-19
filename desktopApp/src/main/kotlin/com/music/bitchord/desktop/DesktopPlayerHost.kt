@@ -1,5 +1,7 @@
 package com.music.bitchord.desktop
 
+import com.music.bitchord.data.settings.LyricsDisplayMode
+
 import androidx.compose.runtime.LaunchedEffect
 
 import androidx.compose.runtime.Composable
@@ -215,6 +217,8 @@ internal object DesktopPlayerSettings : PlayerSettingsSource {
     override val spotifyCanvasAutoHide = MutableStateFlow(true)
     override val syncedLyrics = MutableStateFlow(true)
     override val translationLanguage = DesktopTranslationSetting.language
+    private val lyricsDisplaySetting = DesktopLyricsDisplaySetting(persistence)
+    override val lyricsDisplayMode = lyricsDisplaySetting.mode
     override val versionAlignmentInProgress = MutableStateFlow(false)
 
     override fun setLastPlayerScreen(value: LastPlayerScreen) {
@@ -227,6 +231,8 @@ internal object DesktopPlayerSettings : PlayerSettingsSource {
         lyricsOffsetMs.value = clamped
         persistence.saveInt(KEY_LYRICS_OFFSET, clamped)
     }
+
+    override fun setLyricsDisplayMode(value: LyricsDisplayMode) = lyricsDisplaySetting.set(value)
 
     private const val KEY_LAST_SCREEN = "last_player_screen"
     private const val KEY_LYRICS_OFFSET = "lyrics_offset_ms"

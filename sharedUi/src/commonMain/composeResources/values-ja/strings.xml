@@ -200,4 +200,10 @@
     <string name="search_library_empty">ローカル音楽フォルダ内の曲を検索します。</string>
     <string name="search_library_hint">曲・アーティスト・アルバム</string>
     <string name="search_library_no_results">ローカル音楽に「%1$s」に一致するものはありません。</string>
+    <string name="analysis_absent">曲なし</string>
+    <string name="analysis_source_pending">音源待ち</string>
+    <string name="analysis_unsupported_video">非対応の動画</string>
+    <string name="analysis_unsupported_source">非対応の音源</string>
+    <string name="analysis_no_source">解析用の音源なし</string>
+    <string name="analysis_unavailable">解析機能を利用できません</string>
 </resources>
